@@ -1,0 +1,11 @@
+habr.com
+4pda.to
+4pda.ws
+# TikTok определяет страну по SIM, прокси ему мешает
+tiktok.com
+tiktokv.com
+tiktokv.us
+tiktokw.us
+tiktokcdn.com
+byteoversea.com
+ibytedtos.com

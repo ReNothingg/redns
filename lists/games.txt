@@ -1,0 +1,32 @@
+# Supercell
+supercell.com
+supercell.net
+supercellsupport.com
+brawlstarsgame.com
+clashofclans.com
+clashroyaleapp.com
+squadbustersgame.com
+haydaygame.com
+boombeachgame.com
+mocogame.com
+
+# Xbox
+xsts.auth.xboxlive.com
+gssv-play-prod.xboxlive.com
+gssv-play-prodxhome.xboxlive.com
+xbox.com
+gamepass.com
+
+# GeForce NOW
+geforcenow.com
+gfn.am
+cloudmatchbeta.nvidiagrid.net
+
+# Разное
+marvelsnap.com
+snapgametech.com
+seconddinnertech.com
+ghostrc.game.idtech.services
+shop.gameloft.com
+wbgames.com
+wbagora.com

@@ -1,0 +1,59 @@
+# JetBrains
+jetbrains.com
+jetbrains.space
+jetbrains.team
+youtrack.cloud
+toolbox.app
+
+# HashiCorp
+hashicorp.com
+terraform.io
+vagrantcloud.com
+
+# Atlassian
+atlassian.com
+atlassian.net
+bitbucket.org
+trello.com
+
+# SaaS
+sentry.io
+sentry.dev
+grafana.com
+grafana.net
+elastic.co
+mongodb.com
+redis.io
+redislabs.com
+snyk.io
+posthog.com
+amplitude.com
+heroku.com
+herokucdn.com
+netlify.com
+ngrok.com
+ngrok-agent.com
+swagger.io
+smartbear.com
+qt.io
+pkgs.tailscale.com
+unity.com
+unity3d.com
+
+# Вендоры
+oracle.com
+oraclecloud.com
+java.com
+intel.com
+amd.com
+nvidia.com
+autodesk.com
+vmware.com
+broadcom.com
+omnissa.com
+dell.com
+cisco.com
+ibm.com
+adobe.com
+adobe.io
+adobe.net

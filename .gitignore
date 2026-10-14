@@ -1,0 +1,6 @@
+bin/
+dist/
+*.tgz
+.DS_Store
+config.yaml
+state.json

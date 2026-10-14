@@ -1,0 +1,24 @@
+# Spotify
+spotify.com
+spotifycdn.com
+scdn.co
+
+# Музыка
+tidal.com
+squareup.com
+deezer.com
+dzcdn.net
+soundcloud.com
+qobuz.com
+last.fm
+audioscrobbler.com
+mixcloud.com
+
+# Twitch
+usher.ttvnw.net
+gql.twitch.tv
+
+# Patreon, Imgur
+patreon.com
+patreonusercontent.com
+imgur.com

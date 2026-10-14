@@ -1,0 +1,17 @@
+# Не подключён по умолчанию
+netflix.com
+netflix.net
+nflxext.com
+nflximg.com
+nflximg.net
+nflxso.net
+nflxvideo.net
+fast.com
+disneyplus.com
+disney-plus.net
+bamgrid.com
+max.com
+hbomax.com
+primevideo.com
+crunchyroll.com
+hulu.com

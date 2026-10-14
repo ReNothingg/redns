@@ -1,0 +1,112 @@
+# Значения REDNS_* подставляет deploy/install.sh.
+# После правки: sudo systemctl reload redns (списки, ключи, пароль)
+# или sudo systemctl restart redns (всё остальное).
+
+hostname: "REDNS_HOSTNAME"
+public_ipv4: "REDNS_IPV4"
+public_ipv6: "REDNS_IPV6"
+
+access:
+  # private: DNS отвечает только устройствам с ключом. public: всем.
+  mode: private
+  tokens:
+    - name: me
+      token: "REDNS_TOKEN"
+  # Подсети, которым можно без ключа.
+  allow_cidrs: []
+  auth_ttl: 24h
+  # Запросов в секунду на клиента для обычного DNS.
+  rate_limit: 50
+  # true: прокси только для IP, недавно делавших запрос с ключом.
+  # Переключается и из админки.
+  strict_proxy: false
+
+admin:
+  # Задаётся командой: sudo redns passwd
+  password_hash: ""
+  # false: админка видна только с IP твоих устройств (с ключом),
+  # остальным отвечает 404. true: видна всем, защищена только паролем.
+  public: false
+
+listen:
+  dns: ":53"
+  dot: ":853"
+  doq: ":853"
+  https: ":443"
+  http: ":80"
+  admin: "127.0.0.1:8053"
+
+tls:
+  acme: true
+  email: "REDNS_EMAIL"
+  cache_dir: /var/lib/redns/certs
+  # acme_directory: https://acme-staging-v02.api.letsencrypt.org/directory
+  # cert_file: /etc/redns/fullchain.pem
+  # key_file: /etc/redns/privkey.pem
+
+upstream:
+  servers: ["8.8.8.8", "8.8.4.4", "9.9.9.11"]
+  fallback: ["1.1.1.1", "9.9.9.9"]
+  ecs: true
+  timeout: 2500ms
+
+cache:
+  size: 100000
+  serve_stale: true
+  stale_ttl: 24h
+  prefetch: true
+  max_ttl: 24h
+
+proxy:
+  lists:
+    - lists/ai.txt
+    - lists/dev.txt
+    - lists/games.txt
+    - lists/media.txt
+    - lists/services.txt
+    - lists/custom.txt
+    - https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Categories/geoblock.lst
+    # - lists/streaming.txt
+    # - file: lists/us-only.txt
+    #   via: us
+  exclude:
+    - lists/exclude.txt
+  answer_ttl: 300s
+  forwards:
+    - port: 9339
+      default: game.brawlstarsgame.com
+      targets:
+        - game.brawlstarsgame.com
+        - gamea.clashofclans.com
+        - game.clashroyaleapp.com
+        - game.squadbustersgame.com
+        - game.haydaygame.com
+        - game.boombeachgame.com
+    - port: 30000
+      default: game.mocogame.com
+    - port: 4070
+      targets:
+        - 'regexp:^ap(-[a-z0-9]+)?\.spotify\.com$'
+  # exits:
+  #   us: 198.51.100.7
+  max_conns: 20000
+  max_conns_per_client: 1000
+
+block:
+  enabled: true
+  lists:
+    - https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
+    - https://raw.githubusercontent.com/ImMALWARE/dns.malw.link/master/lists/garbage.txt
+  allow: []
+
+hosts: []
+
+lists:
+  refresh: 12h
+  cache_dir: /var/lib/redns/lists
+
+state_file: /var/lib/redns/state.json
+
+log:
+  level: info
+  querylog_size: 2000
