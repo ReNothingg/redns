@@ -209,26 +209,74 @@
           <ol class="steps">
             <li>
               <div>
+                <span class="path">Параметры → Сеть и Интернет → Ethernet</span
+                >. Если интернет по Wi‑Fi:
+                <span class="path">Wi‑Fi → Свойства оборудования</span>.
+              </div>
+            </li>
+            <li>
+              <div>
+                Строку «Назначение IP» не трогай, там должно остаться
+                «Автоматически (DHCP)». Нужна
                 <span class="path"
-                  >Параметры → Сеть и Интернет → Wi‑Fi или Ethernet → Назначение
-                  DNS-сервера → Изменить → Вручную</span
+                  >Назначение DNS-сервера → Изменить → Вручную</span
                 >.
               </div>
             </li>
             <li>
               <div>
-                IPv4: <span class="mono">{{.IPv4}}</span>. «DNS через HTTPS»
-                включить, ручной шаблон:
+                Включи IPv4. Предпочтительный DNS-сервер:
+                <div class="inline-copy">
+                  <button class="copy" data-copy="{{.IPv4}}">
+                    <span class="v">{{.IPv4}}</span
+                    ><span class="c">Копировать</span>
+                  </button>
+                </div>
+              </div>
+            </li>
+            <li>
+              <div>
+                «DNS по протоколу HTTPS» → «Включено (ручной шаблон)», в шаблон
+                вставь:
+                <div class="inline-copy">
+                  <button class="copy" data-copy="{{.DoHURL}}">
+                    <span class="v">{{.DoHURL}}</span
+                    ><span class="c">Копировать</span>
+                  </button>
+                </div>
+              </div>
+            </li>
+            <li>
+              <div>
+                «Возврат к обычному тексту» выключи, иначе при сбое запросы
+                уйдут открытым текстом. Дополнительный DNS оставь пустым.
+              </div>
+            </li>
+            {{if .IPv6}}
+            <li>
+              <div>
+                Включи IPv6 и заполни так же: тот же шаблон, «Возврат» выключен,
+                а DNS-сервер:
+                <div class="inline-copy">
+                  <button class="copy" data-copy="{{.IPv6}}">
+                    <span class="v">{{.IPv6}}</span
+                    ><span class="c">Копировать</span>
+                  </button>
+                </div>
+                Без этого Windows может ходить в DNS провайдера по IPv6.
+              </div>
+            </li>
+            {{end}}
+            <li>
+              <div>
+                Сохрани и обнови эту страницу: сверху должно быть «Работает».
               </div>
             </li>
           </ol>
-          <div class="inline-copy">
-            <button class="copy" data-copy="{{.DoHURL}}">
-              <span class="v">{{.DoHURL}}</span
-              ><span class="c">Копировать</span>
-            </button>
-          </div>
-          <p class="note">Альтернативный DNS оставь пустым.</p>
+          <p class="note">
+            Windows 10 шифрованный DNS в настройках не умеет. Там настрой
+            браузер, вкладка «Браузер».
+          </p>
         </div>
 
         <div class="panel" id="p-browser">
@@ -237,7 +285,9 @@
               <div>
                 Chrome, Edge, Яндекс:
                 <span class="path"
-                  >Настройки → Конфиденциальность → Безопасный DNS → Свой</span
+                  >Настройки → Конфиденциальность и безопасность → Безопасность
+                  → Использовать безопасный DNS → Выбрать поставщика →
+                  Другое</span
                 >.
               </div>
             </li>
@@ -245,48 +295,83 @@
               <div>
                 Firefox:
                 <span class="path"
-                  >Настройки → Приватность → DNS через HTTPS → Максимальная
-                  защита</span
+                  >Настройки → Приватность и защита → DNS через HTTPS →
+                  Максимальная защита → Свой поставщик</span
                 >.
               </div>
             </li>
-            <li><div>Адрес:</div></li>
+            <li>
+              <div>
+                Вставь адрес:
+                <div class="inline-copy">
+                  <button class="copy" data-copy="{{.DoHURL}}">
+                    <span class="v">{{.DoHURL}}</span
+                    ><span class="c">Копировать</span>
+                  </button>
+                </div>
+              </div>
+            </li>
           </ol>
-          <div class="inline-copy">
-            <button class="copy" data-copy="{{.DoHURL}}">
-              <span class="v">{{.DoHURL}}</span
-              ><span class="c">Копировать</span>
-            </button>
-          </div>
+          <p class="note">
+            Так через ReDNS ходит только этот браузер. Приложения, например
+            Codex или игры, пойдут мимо: для них настраивай систему.
+          </p>
         </div>
 
         <div class="panel" id="p-router">
           <ol class="steps">
             <li>
               <div>
-                Keenetic:
+                Keenetic: в
                 <span class="path"
-                  >Интернет-фильтры → Настройка DNS → Добавить сервер</span
-                >, тип DoH.
+                  >Общие настройки → Изменить набор компонентов</span
+                >
+                поставь «Прокси-сервер DNS-over-HTTPS», затем
+                <span class="path"
+                  >Интернет-фильтры → Настройка DNS → Добавить сервер →
+                  DNS-over-HTTPS</span
+                >
+                и вставь адрес:
+                <div class="inline-copy">
+                  <button class="copy" data-copy="{{.DoHURL}}">
+                    <span class="v">{{.DoHURL}}</span
+                    ><span class="c">Копировать</span>
+                  </button>
+                </div>
               </div>
             </li>
             <li>
               <div>
-                MikroTik:
-                <span class="mono"
-                  >/ip dns set use-doh-server=… verify-doh-cert=yes</span
-                >
-                и статическая запись {{.Host}} → {{.IPv4}}.
+                MikroTik, в терминале:
+                <div class="inline-copy">
+                  <button
+                    class="copy"
+                    data-copy="/ip dns static add name={{.Host}} address={{.IPv4}}"
+                  >
+                    <span class="v"
+                      >/ip dns static add name={{.Host}} address={{.IPv4}}</span
+                    ><span class="c">Копировать</span>
+                  </button>
+                </div>
+                <div class="inline-copy">
+                  <button
+                    class="copy"
+                    data-copy="/ip dns set use-doh-server={{.DoHURL}} verify-doh-cert=yes allow-remote-requests=yes"
+                  >
+                    <span class="v"
+                      >/ip dns set use-doh-server={{.DoHURL}}
+                      verify-doh-cert=yes allow-remote-requests=yes</span
+                    ><span class="c">Копировать</span>
+                  </button>
+                </div>
               </div>
             </li>
-            <li><div>Адрес:</div></li>
           </ol>
-          <div class="inline-copy">
-            <button class="copy" data-copy="{{.DoHURL}}">
-              <span class="v">{{.DoHURL}}</span
-              ><span class="c">Копировать</span>
-            </button>
-          </div>
+          <p class="note">
+            Через роутер ReDNS получают все устройства дома, даже те, где
+            настроек DNS нет: телевизор, приставка, Apple Watch. Ключ у них
+            общий, в админке они будут одним устройством.
+          </p>
         </div>
       </section>
 

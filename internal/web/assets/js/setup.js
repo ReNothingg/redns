@@ -68,6 +68,8 @@
     $("facts").appendChild(d);
   }
   function ago(s) {
+    s = Number(s) || 0;
+    if (s < 5) return "только что";
     return s < 60
       ? s + " с назад"
       : s < 3600

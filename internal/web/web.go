@@ -242,7 +242,7 @@ type whoamiResp struct {
 	IP          string `json:"ip"`
 	UsingDNS    bool   `json:"using_dns"`
 	Proto       string `json:"proto,omitempty"`
-	SecondsAgo  int    `json:"seconds_ago,omitempty"`
+	SecondsAgo  int    `json:"seconds_ago"`
 	ProxyAccess bool   `json:"proxy_access"`
 	Private     bool   `json:"private"`
 	Host        string `json:"host"`
