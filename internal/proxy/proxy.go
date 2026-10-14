@@ -267,7 +267,16 @@ func (p *Proxy) relay(c net.Conn, ip netip.Addr, host string, port int, exit str
 		return
 	}
 	var upN, downN int64
-	defer func() { p.release(ip, c, upN, downN) }()
+	start := time.Now()
+	entry := stats.Conn{Time: start, Client: ip.String(), Host: host, Port: port}
+	if cl, ok := p.o.Access.Lookup(ip); ok {
+		entry.Device = cl.Device
+	}
+	defer func() {
+		p.release(ip, c, upN, downN)
+		entry.Up, entry.Down, entry.Ms = uint64(upN), uint64(downN), time.Since(start).Milliseconds()
+		p.o.Stats.Conns().Add(entry)
+	}()
 	p.o.Stats.ProxiedConn(host)
 
 	ctx, cancel := context.WithTimeout(context.Background(), p.o.DialTimeout)
@@ -275,6 +284,7 @@ func (p *Proxy) relay(c net.Conn, ip netip.Addr, host string, port int, exit str
 	cancel()
 	if err != nil {
 		p.o.Stats.DialErrors.Add(1)
+		entry.Err = "не удалось подключиться"
 		slog.Debug("dial failed", "host", host, "port", port, "exit", exit, "err", err)
 		return
 	}

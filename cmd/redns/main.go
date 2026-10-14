@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -21,9 +22,11 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/renothingg/redns/internal/access"
 	"github.com/renothingg/redns/internal/app"
 	"github.com/renothingg/redns/internal/config"
 	"github.com/renothingg/redns/internal/lists"
+	"github.com/renothingg/redns/internal/state"
 	"github.com/renothingg/redns/internal/stats"
 	"github.com/renothingg/redns/internal/web"
 )
@@ -39,6 +42,7 @@ Usage:
   redns run      [-c config]          start the server
   redns check    [-c config]          validate config and load all lists
   redns token                         print a new random access token
+  redns key      [-c config] [-q]     print a working setup link, issue a new key if yours was revoked
   redns passwd   [-c config] [-q]     set a new random admin panel password
   redns profile  [-c config] -token T [-only doh|dot]   print an Apple .mobileconfig
   redns stats    [-admin addr]        counters, top proxied names
@@ -67,6 +71,8 @@ func main() {
 		fmt.Println(newToken())
 	case "passwd":
 		err = cmdPasswd(args)
+	case "key":
+		err = cmdKey(args)
 	case "profile":
 		err = cmdProfile(args)
 	case "stats", "log", "clients", "lists", "why", "reload":
@@ -242,14 +248,7 @@ func cmdPasswd(args []string) error {
 	default:
 		raw = append(raw, []byte("\nadmin:\n  password_hash:"+value+"\n")...)
 	}
-	tmp := *path + ".tmp"
-	if err := os.WriteFile(tmp, raw, st.Mode().Perm()); err != nil {
-		return err
-	}
-	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
-		_ = os.Chown(tmp, int(sys.Uid), int(sys.Gid))
-	}
-	if err := os.Rename(tmp, *path); err != nil {
+	if err := replaceFile(*path, raw, st); err != nil {
 		return err
 	}
 	if *quiet {
@@ -261,6 +260,78 @@ func cmdPasswd(args []string) error {
 		return nil
 	}
 	fmt.Printf("Новый пароль админки: %s\nУже действует, старый больше не подходит.\n", pw)
+	return nil
+}
+
+func replaceFile(path string, raw []byte, st os.FileInfo) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, raw, st.Mode().Perm()); err != nil {
+		return err
+	}
+	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
+		_ = os.Chown(tmp, int(sys.Uid), int(sys.Gid))
+	}
+	return os.Rename(tmp, path)
+}
+
+func cmdKey(args []string) error {
+	fs := flag.NewFlagSet("key", flag.ExitOnError)
+	path := configFlag(fs)
+	quiet := fs.Bool("q", false, "print only the key")
+	_ = fs.Parse(args)
+	cfg, err := config.Load(*path)
+	if err != nil {
+		return err
+	}
+	var data state.Data
+	if raw, err := os.ReadFile(cfg.Resolve(cfg.State)); err == nil {
+		_ = json.Unmarshal(raw, &data)
+	}
+	revoked := map[string]bool{}
+	for _, t := range data.Revoked {
+		revoked[t] = true
+	}
+	key := ""
+	for _, t := range cfg.Access.Tokens {
+		if !revoked[t.Token] {
+			key = t.Token
+			break
+		}
+	}
+	for _, t := range data.Tokens {
+		if key == "" && (t.Owner == "" || t.Owner == access.Owner) && !revoked[t.Token] {
+			key = t.Token
+		}
+	}
+	fresh := false
+	if key == "" {
+		if len(cfg.Access.Tokens) == 0 {
+			return fmt.Errorf("в %s нет ни одного ключа в access.tokens", *path)
+		}
+		raw, err := os.ReadFile(*path)
+		if err != nil {
+			return err
+		}
+		st, err := os.Stat(*path)
+		if err != nil {
+			return err
+		}
+		key = newToken()
+		raw = bytes.ReplaceAll(raw, []byte(cfg.Access.Tokens[0].Token), []byte(key))
+		if err := replaceFile(*path, raw, st); err != nil {
+			return err
+		}
+		fresh = true
+		fmt.Fprintln(os.Stderr, "Твой ключ был отключён в админке, выдал новый. Профили со старым ключом надо поставить заново.")
+	}
+	if *quiet {
+		fmt.Println(key)
+		return nil
+	}
+	if fresh && exec.Command("systemctl", "reload", "redns").Run() != nil {
+		fmt.Println("Чтобы новый ключ заработал: sudo systemctl reload redns")
+	}
+	fmt.Printf("Ссылка настройки: https://%s/setup/%s\n", cfg.Hostname, key)
 	return nil
 }
 

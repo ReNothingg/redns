@@ -2,10 +2,8 @@ package web
 
 import (
 	"crypto/rand"
-	"embed"
 	"encoding/json"
 	"html/template"
-	"io/fs"
 	"net/http"
 	"net/netip"
 	"strconv"
@@ -14,17 +12,10 @@ import (
 	"time"
 
 	"github.com/renothingg/redns/internal/access"
+	"github.com/renothingg/redns/internal/audit"
 	"github.com/renothingg/redns/internal/proxy"
 	"github.com/renothingg/redns/internal/state"
 	"github.com/renothingg/redns/internal/stats"
-)
-
-//go:embed assets
-var assets embed.FS
-
-var (
-	setupTmpl = template.Must(template.ParseFS(assets, "assets/setup.html"))
-	adminTmpl = template.Must(template.ParseFS(assets, "assets/admin.html"))
 )
 
 type ProxyView interface {
@@ -51,6 +42,8 @@ type Options struct {
 	Apply        func(state.Data)
 	PasswordHash func() string
 	AdminPublic  func() bool
+	Audit        *audit.Log
+	SessionsPath string
 }
 
 type Web struct {
@@ -69,8 +62,6 @@ func New(o Options) *Web {
 }
 
 func (w *Web) HTTPS() http.Handler {
-	static, _ := fs.Sub(assets, "assets")
-	files := http.FileServer(http.FS(static))
 	mux := http.NewServeMux()
 	mux.Handle("/dns-query", w.o.DoH)
 	mux.Handle("/dns-query/", w.o.DoH)
@@ -78,14 +69,7 @@ func (w *Web) HTTPS() http.Handler {
 		rw.Header().Set("Content-Type", "text/plain")
 		_, _ = rw.Write([]byte("ok\n"))
 	})
-	mux.Handle("/assets/", http.StripPrefix("/assets/", http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, ".html") {
-			http.NotFound(rw, r)
-			return
-		}
-		rw.Header().Set("Cache-Control", "public, max-age=86400")
-		files.ServeHTTP(rw, r)
-	})))
+	mux.Handle("/assets/", http.StripPrefix("/assets/", staticFiles()))
 	mux.HandleFunc("/api/whoami", w.whoami)
 	mux.HandleFunc("/api/test", w.speedTest)
 	mux.HandleFunc("/setup/", w.setup)
@@ -150,17 +134,21 @@ type pageData struct {
 	ProfileBase      string
 	Rules            int
 	Version          string
+	Assets           string
+	Icons            template.HTML
+	Admin            bool
 }
 
 func (w *Web) data(tok string) pageData {
 	d := pageData{
 		Host: w.o.Host, IPv4: w.o.IPv4, IPv6: w.o.IPv6,
-		Private: w.o.Access.Private(), Version: w.o.Version,
+		Private: w.o.Access.Private(), Version: w.o.Version, Assets: assetVersion, Icons: icons,
 		DoHURL: "https://" + w.o.Host + "/dns-query", DoTHost: w.o.Host, DoT: !w.o.Access.Private(),
 		ProfileBase: "/setup",
 	}
 	if tok != "" {
 		d.TokenName = w.o.Access.TokenName(tok)
+		d.Admin = w.admin.enabled() && w.o.Access.TokenOwner(tok) == access.Owner
 		d.DoHURL += "/" + tok
 		d.ProfileBase = "/setup/" + tok
 	}

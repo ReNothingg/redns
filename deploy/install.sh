@@ -163,7 +163,7 @@ if ! grep -qE '^[[:space:]]*password_hash:[[:space:]]*"\$2' $CONFIG; then
 fi
 chown root:redns $CONFIG
 chmod 0640 $CONFIG
-TOKEN="$(grep -m1 -E '^ +token:' $CONFIG | sed -E 's/.*token: *"?([a-z0-9]*)"?.*/\1/')"
+TOKEN="$(/usr/local/bin/redns key -q -c $CONFIG || true)"
 MODE_NOW="$(grep -m1 -E '^  mode:' $CONFIG | awk '{print $2}')"
 
 info "Проверяю конфиг и скачиваю списки"

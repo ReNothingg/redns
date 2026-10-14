@@ -80,6 +80,9 @@ x.ai
 grok.com
 grokusercontent.com
 grok.x.com
+# Перевод Grok в приложении X проверяет страну на API
+full:api.x.com
+full:api.twitter.com
 
 # Редакторы и агенты
 cursor.com

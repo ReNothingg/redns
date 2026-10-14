@@ -1,0 +1,53 @@
+.speed {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.big {
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.big small {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--muted);
+  margin-left: 8px;
+}
+
+.meter {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--raised);
+  margin: 22px 0 12px;
+  overflow: hidden;
+}
+
+.meter i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.15s linear;
+}
+
+#tres {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--muted);
+  min-height: 20px;
+}
+
+#twarn {
+  display: none;
+  margin-top: 14px;
+  color: var(--warn);
+  font-size: 15px;
+}

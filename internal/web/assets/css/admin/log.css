@@ -1,0 +1,77 @@
+.log > .row {
+  display: grid;
+  grid-template-columns: 80px 150px 1fr 84px;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 20px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.log > .row + .row {
+  border-top: 1px solid var(--line);
+}
+
+.log > .row:not(.th):hover {
+  background: var(--card);
+}
+
+.log > .row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log > .row.conn {
+  grid-template-columns: 80px 150px 1fr 190px;
+}
+
+.log > .row.conn.err .host {
+  color: var(--down);
+}
+
+.log > .row.ev {
+  grid-template-columns: 110px 1fr 140px;
+  font-family: var(--sans);
+  font-size: 13px;
+}
+
+.log > .row.ev .act {
+  white-space: normal;
+}
+
+.log > .row.ev .act b {
+  font-weight: 600;
+}
+
+.log > .row.ev.warn .act b {
+  color: var(--warn);
+}
+
+.log .sub {
+  color: var(--muted);
+}
+
+.log .right {
+  text-align: right;
+}
+
+@media (max-width: 860px) {
+  .log > .row {
+    grid-template-columns: 64px 1fr 70px;
+    padding: 9px 16px;
+  }
+  .log > .row .cl {
+    display: none;
+  }
+  .log > .row.conn {
+    grid-template-columns: 64px 1fr 96px;
+  }
+  .log > .row.ev {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+  .log > .row.ev .cl {
+    display: block;
+  }
+}

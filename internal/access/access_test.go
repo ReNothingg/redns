@@ -151,3 +151,21 @@ func TestBansAndPanelTokens(t *testing.T) {
 		t.Fatalf("devices = %+v", devs)
 	}
 }
+
+func TestOnlyOwnDevicesAreTrusted(t *testing.T) {
+	a, _ := newTest("private")
+	a.Update(config.Access{Mode: "private", Tokens: []config.Token{{Name: "phone", Token: tok}}, AuthTTL: time.Hour},
+		state.Data{Tokens: []state.Token{{Name: "Android", Owner: "Саша", Token: "friendtoken12345"}}})
+	mine, friend := netip.MustParseAddr("203.0.113.1"), netip.MustParseAddr("203.0.113.2")
+	a.Authorize(mine, tok)
+	a.Authorize(friend, "friendtoken12345")
+	if !a.Trusted(mine) {
+		t.Fatal("own device must be trusted")
+	}
+	if a.Trusted(friend) {
+		t.Fatal("a friend's key must not unlock the admin")
+	}
+	if !a.Allowed(friend) {
+		t.Fatal("the friend still uses DNS")
+	}
+}

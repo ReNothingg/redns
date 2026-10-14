@@ -1,0 +1,166 @@
+.label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 18px;
+}
+
+.label span:first-child {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.tabs {
+  margin-bottom: 12px;
+}
+
+.tabs button {
+  font-size: 15px;
+  padding-bottom: 14px;
+}
+
+.panel {
+  display: none;
+}
+
+.panel.active {
+  display: block;
+}
+
+ol.steps {
+  list-style: none;
+  counter-reset: s;
+}
+
+ol.steps > li {
+  counter-increment: s;
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  padding: 9px 0;
+}
+
+ol.steps > li::before {
+  content: counter(s);
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--raised);
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 1px;
+}
+
+ol.steps.cont {
+  counter-reset: s 2;
+}
+
+.path {
+  font-weight: 600;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px 22px;
+  margin: 8px 0 8px 36px;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.copy {
+  appearance: none;
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--card);
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 96px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  transition:
+    background-color 0.12s,
+    border-color 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.copy:hover {
+  background: var(--raised);
+}
+
+.copy .k {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.copy .v {
+  font-family: var(--mono);
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.copy .c {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-ink);
+  white-space: nowrap;
+}
+
+.copy.done {
+  border-color: var(--accent);
+}
+
+.inline-copy {
+  margin: 4px 0 0 36px;
+}
+
+.inline-copy .copy {
+  grid-template-columns: 1fr auto;
+}
+
+.note {
+  color: var(--muted);
+  font-size: 14px;
+  margin-top: 16px;
+}
+
+@media (max-width: 480px) {
+  .copy {
+    grid-template-columns: 1fr auto;
+    row-gap: 4px;
+  }
+  .copy .k {
+    grid-column: 1 / -1;
+  }
+  .actions {
+    margin-left: 0;
+  }
+  .actions .btn {
+    width: 100%;
+  }
+  .inline-copy {
+    margin-left: 0;
+  }
+}

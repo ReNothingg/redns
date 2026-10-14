@@ -32,7 +32,7 @@ func esc(s string) string {
 }
 
 func Agreement(host string) string {
-	raw, err := assets.ReadFile("assets/agreement.txt")
+	raw, err := files.ReadFile("templates/agreement.txt")
 	if err != nil {
 		return ""
 	}

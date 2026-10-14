@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,7 @@ import (
 	"github.com/miekg/dns"
 
 	"github.com/renothingg/redns/internal/access"
+	"github.com/renothingg/redns/internal/audit"
 	"github.com/renothingg/redns/internal/certs"
 	"github.com/renothingg/redns/internal/config"
 	"github.com/renothingg/redns/internal/dnsx"
@@ -32,6 +34,7 @@ type App struct {
 	version string
 
 	stats    *stats.Stats
+	audit    *audit.Log
 	store    *state.Store
 	access   *access.Access
 	accCfg   atomic.Pointer[config.Access]
@@ -61,12 +64,21 @@ func New(ctx context.Context, cfg *config.Config, version string) (*App, error) 
 		return nil, fmt.Errorf("state %s: %w", cfg.State, err)
 	}
 	a.store = store
+	a.audit, err = audit.Open(filepath.Join(filepath.Dir(cfg.Resolve(cfg.State)), "audit.log"), 2000)
+	if err != nil {
+		return nil, fmt.Errorf("audit log: %w", err)
+	}
 	accCfg := cfg.Access
 	a.accCfg.Store(&accCfg)
 	hash := cfg.Admin.PasswordHash
-	a.pwHash.Store(&hash)
+	if old := a.pwHash.Swap(&hash); old != nil && *old != hash {
+		a.audit.Warn("Пароль админки сменён, все входы сброшены", "", "")
+	}
 	a.adminPub.Store(cfg.Admin.Public)
 	a.access = access.New(cfg.Hostname, cfg.Access, store.Get())
+	a.access.OnBlock(func(p netip.Prefix) {
+		a.audit.Warn("Подбор ключа: IP заблокирован на час", p.String(), "")
+	})
 	a.fetcher = lists.NewFetcher(cfg.Resolve(cfg.Lists.CacheDir))
 
 	pol, infos, err := BuildPolicy(ctx, cfg, a.fetcher)
@@ -156,6 +168,8 @@ func (a *App) Start(ctx context.Context) error {
 		Apply:        func(d state.Data) { a.access.Update(*a.accCfg.Load(), d) },
 		PasswordHash: func() string { return *a.pwHash.Load() },
 		AdminPublic:  func() bool { return a.adminPub.Load() },
+		Audit:        a.audit,
+		SessionsPath: filepath.Join(filepath.Dir(cfg.Resolve(cfg.State)), "admin-sessions.json"),
 	})
 
 	httpsSrv := &http.Server{
@@ -219,6 +233,7 @@ func (a *App) Start(ctx context.Context) error {
 		go func() { _ = admin.Serve(ln) }()
 	}
 
+	a.audit.Info("Сервер запущен", "", a.version)
 	go a.certs.Warm(ctx)
 	go a.maintenance(ctx)
 	slog.Info("ReDNS started",
@@ -280,6 +295,7 @@ func (a *App) Reload(ctx context.Context) error {
 	a.access.Update(cfg.Access, a.store.Get())
 	a.res.SetPolicy(pol)
 	a.infos.Store(&infos)
+	a.audit.Info("Конфиг перечитан", "", "")
 	slog.Info("reloaded", "proxy_rules", pol.Proxy.Len(), "block_rules", pol.Block.Len(), "tokens", len(cfg.Access.Tokens))
 	return nil
 }

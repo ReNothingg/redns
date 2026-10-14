@@ -1,0 +1,56 @@
+.setting {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.setting p {
+  color: var(--muted);
+  max-width: 46em;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  margin-top: 12px;
+}
+
+.kv dt,
+.kv dd {
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.kv dt {
+  color: var(--muted);
+}
+
+.kv dd.mono {
+  font-size: 13px;
+}
+
+code.cmd {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  background: var(--raised);
+  color: var(--fg);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+@media (max-width: 860px) {
+  .kv {
+    grid-template-columns: 1fr;
+  }
+  .kv dt {
+    padding-bottom: 0;
+  }
+  .kv dd {
+    border-top: 0;
+    padding-top: 2px;
+  }
+  .setting {
+    gap: 14px;
+  }
+}

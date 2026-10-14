@@ -1,0 +1,40 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--raised);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.badge.own,
+.badge.proxy,
+.badge.ok {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.badge.stranger,
+.badge.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.badge.bad,
+.badge.block {
+  background: var(--down-soft);
+  color: var(--down);
+}
+
+.badge.ok::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}

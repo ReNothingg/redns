@@ -1,0 +1,49 @@
+.login {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 36px 32px 28px;
+  border-radius: 16px;
+}
+
+.login-card h1 {
+  font-size: 26px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 28px 0 4px;
+}
+
+.login-card .host {
+  color: var(--muted);
+  margin-bottom: 24px;
+}
+
+.login-card label {
+  display: block;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.login-card .input {
+  height: 48px;
+  padding: 0 14px;
+}
+
+.login-card .btn {
+  width: 100%;
+  margin-top: 16px;
+}
+
+@media (max-width: 420px) {
+  .login-card {
+    padding: 28px 20px 20px;
+  }
+}

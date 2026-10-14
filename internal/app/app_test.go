@@ -459,6 +459,34 @@ func TestIntegrationAdmin(t *testing.T) {
 		t.Fatalf("state not persisted: %s %v", saved, err)
 	}
 
+	code, raw = adminCall(t, hc, "POST", "devices/add", map[string]string{"owner": "Саша", "kind": "android"}, true)
+	var friend struct {
+		Token, Owner, Name string
+	}
+	if code != 200 || json.Unmarshal(raw, &friend) != nil || friend.Owner != "Саша" || friend.Name != "Android" {
+		t.Fatalf("add friend device = %d %s", code, raw)
+	}
+	req, _ := http.NewRequest("GET", "https://dns.test.net/admin/api/qr?token="+friend.Token, nil)
+	qrResp, err := hc.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	png, _ := io.ReadAll(qrResp.Body)
+	qrResp.Body.Close()
+	if qrResp.StatusCode != 200 || !bytes.HasPrefix(png, []byte("\x89PNG")) {
+		t.Fatalf("qr = %d", qrResp.StatusCode)
+	}
+	code, raw = adminCall(t, hc, "GET", "devices", nil, false)
+	if code != 200 || !bytes.Contains(raw, []byte(`"owner":"Саша"`)) || !bytes.Contains(raw, []byte(`"online"`)) {
+		t.Fatalf("devices = %d %s", code, raw)
+	}
+	if code, _ := adminCall(t, hc, "POST", "devices/revoke-owner", map[string]string{"owner": "Саша"}, true); code != 200 {
+		t.Fatal("revoke owner")
+	}
+	if code, raw = adminCall(t, hc, "GET", "devices", nil, false); bytes.Contains(raw, []byte(friend.Token)) {
+		t.Fatal("friend's devices must be gone")
+	}
+
 	if code, _ := adminCall(t, hc, "POST", "devices/revoke", map[string]string{"token": dev.Token}, true); code != 200 {
 		t.Fatal("revoke")
 	}

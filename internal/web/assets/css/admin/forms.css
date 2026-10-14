@@ -1,0 +1,27 @@
+.form-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.form-row .input {
+  flex: 1 1 220px;
+}
+
+.search {
+  position: relative;
+}
+
+.search svg {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+
+.search .input {
+  padding-left: 36px;
+}

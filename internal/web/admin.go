@@ -2,12 +2,16 @@ package web
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,9 +19,12 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+	"rsc.io/qr"
 
 	"github.com/renothingg/redns/internal/access"
+	"github.com/renothingg/redns/internal/audit"
 	"github.com/renothingg/redns/internal/config"
+	"github.com/renothingg/redns/internal/proxy"
 	"github.com/renothingg/redns/internal/state"
 	"github.com/renothingg/redns/internal/stats"
 )
@@ -33,9 +40,98 @@ type admin struct {
 	w *Web
 
 	mu       sync.Mutex
-	sessions map[string]time.Time
+	sessions map[string]*session
 	fails    map[netip.Prefix]failState
 	now      func() time.Time
+}
+
+type session struct {
+	Expires  time.Time `json:"expires"`
+	Created  time.Time `json:"created"`
+	LastSeen time.Time `json:"last_seen"`
+	IP       string    `json:"ip"`
+	Agent    string    `json:"agent"`
+	PW       string    `json:"pw"`
+}
+
+func passwordTag(hash string) string {
+	sum := sha256.Sum256([]byte("redns-session:" + hash))
+	return hex.EncodeToString(sum[:8])
+}
+
+func sessionKey(sid string) string {
+	sum := sha256.Sum256([]byte(sid))
+	return hex.EncodeToString(sum[:])
+}
+
+func sessionID(key string) string { return key[:10] }
+
+func (a *admin) loadSessions() {
+	raw, err := os.ReadFile(a.w.o.SessionsPath)
+	if err != nil {
+		return
+	}
+	saved := map[string]*session{}
+	if json.Unmarshal(raw, &saved) != nil {
+		return
+	}
+	now := a.now()
+	for k, s := range saved {
+		if len(k) == 64 && s != nil && now.Before(s.Expires) {
+			a.sessions[k] = s
+		}
+	}
+}
+
+func (a *admin) saveLocked() {
+	path := a.w.o.SessionsPath
+	if path == "" {
+		return
+	}
+	raw, err := json.Marshal(a.sessions)
+	if err != nil {
+		return
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".sessions-*")
+	if err != nil {
+		return
+	}
+	_, werr := tmp.Write(raw)
+	if werr != nil || tmp.Chmod(0o600) != nil || tmp.Close() != nil || os.Rename(tmp.Name(), path) != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+	}
+}
+
+func agentLabel(ua string) string {
+	osName := "Устройство"
+	for _, p := range [][2]string{{"iPhone", "iPhone"}, {"iPad", "iPad"}, {"Android", "Android"}, {"Mac OS X", "Mac"}, {"Windows", "Windows"}, {"Linux", "Linux"}} {
+		if strings.Contains(ua, p[0]) {
+			osName = p[1]
+			break
+		}
+	}
+	browser := ""
+	for _, p := range [][2]string{{"YaBrowser", "Яндекс"}, {"Edg/", "Edge"}, {"Firefox", "Firefox"}, {"Chrome", "Chrome"}, {"Safari", "Safari"}} {
+		if strings.Contains(ua, p[0]) {
+			browser = p[1]
+			break
+		}
+	}
+	if browser == "" {
+		return osName
+	}
+	return osName + " · " + browser
+}
+
+func (a *admin) record(r *http.Request, warn bool, action, detail string) {
+	l := a.w.o.Audit
+	ip := remoteIP(r).String()
+	if warn {
+		l.Warn(action, ip, detail)
+		return
+	}
+	l.Info(action, ip, detail)
 }
 
 type failState struct {
@@ -44,7 +140,11 @@ type failState struct {
 }
 
 func newAdmin(w *Web) *admin {
-	return &admin{w: w, sessions: map[string]time.Time{}, fails: map[netip.Prefix]failState{}, now: time.Now}
+	a := &admin{w: w, sessions: map[string]*session{}, fails: map[netip.Prefix]failState{}, now: time.Now}
+	if w.o.SessionsPath != "" {
+		a.loadSessions()
+	}
+	return a
 }
 
 func (a *admin) enabled() bool {
@@ -53,6 +153,9 @@ func (a *admin) enabled() bool {
 
 func (a *admin) visible(r *http.Request) bool {
 	if a.w.o.AdminPublic != nil && a.w.o.AdminPublic() {
+		return true
+	}
+	if _, ok := a.session(r); ok {
 		return true
 	}
 	return a.w.o.Access.Trusted(remoteIP(r))
@@ -66,7 +169,7 @@ func (a *admin) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Cache-Control", "no-store")
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	if path == "/admin" {
-		render(rw, adminTmpl, map[string]string{"Host": a.w.o.Host, "Version": a.w.o.Version})
+		render(rw, adminTmpl, map[string]any{"Host": a.w.o.Host, "Version": a.w.o.Version, "Assets": assetVersion, "Icons": icons})
 		return
 	}
 	api, ok := strings.CutPrefix(path, "/admin/api/")
@@ -82,26 +185,35 @@ func (a *admin) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		a.login(rw, r)
 		return
 	}
-	if !a.authed(r) {
+	key, ok := a.session(r)
+	if !ok {
 		http.Error(rw, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	a.renew(rw, r, key)
 	type handler struct {
 		method string
 		fn     func(http.ResponseWriter, *http.Request)
 	}
 	routes := map[string]handler{
-		"logout":         {http.MethodPost, a.logout},
-		"overview":       {http.MethodGet, a.overview},
-		"clients":        {http.MethodGet, a.clients},
-		"devices":        {http.MethodGet, a.devices},
-		"devices/add":    {http.MethodPost, a.addDevice},
-		"devices/revoke": {http.MethodPost, a.revokeDevice},
-		"bans/add":       {http.MethodPost, a.ban},
-		"bans/remove":    {http.MethodPost, a.unban},
-		"kick":           {http.MethodPost, a.kick},
-		"settings":       {http.MethodPost, a.settings},
-		"log":            {http.MethodGet, a.log},
+		"logout":               {http.MethodPost, a.logout},
+		"overview":             {http.MethodGet, a.overview},
+		"clients":              {http.MethodGet, a.clients},
+		"devices":              {http.MethodGet, a.devices},
+		"devices/add":          {http.MethodPost, a.addDevice},
+		"devices/revoke":       {http.MethodPost, a.revokeDevice},
+		"devices/revoke-owner": {http.MethodPost, a.revokeOwner},
+		"qr":                   {http.MethodGet, a.qr},
+		"bans/add":             {http.MethodPost, a.ban},
+		"bans/remove":          {http.MethodPost, a.unban},
+		"kick":                 {http.MethodPost, a.kick},
+		"settings":             {http.MethodPost, a.settings},
+		"log":                  {http.MethodGet, a.log},
+		"conns":                {http.MethodGet, a.conns},
+		"audit":                {http.MethodGet, a.auditLog},
+		"sessions":             {http.MethodGet, a.listSessions},
+		"sessions/end":         {http.MethodPost, a.endSession},
+		"sessions/end-others":  {http.MethodPost, a.endOtherSessions},
 	}
 	h, ok := routes[api]
 	if !ok {
@@ -115,19 +227,53 @@ func (a *admin) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	h.fn(rw, r)
 }
 
-func (a *admin) authed(r *http.Request) bool {
+func (a *admin) session(r *http.Request) (string, bool) {
 	c, err := r.Cookie(sessionCookie)
 	if err != nil {
-		return false
+		return "", false
 	}
+	key := sessionKey(c.Value)
+	now := a.now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	exp, ok := a.sessions[c.Value]
-	if !ok || a.now().After(exp) {
-		delete(a.sessions, c.Value)
-		return false
+	s, ok := a.sessions[key]
+	if !ok {
+		return "", false
 	}
-	return true
+	if now.After(s.Expires) || s.PW != passwordTag(a.w.o.PasswordHash()) {
+		delete(a.sessions, key)
+		a.saveLocked()
+		return "", false
+	}
+	s.LastSeen = now
+	s.IP = remoteIP(r).String()
+	return key, true
+}
+
+func (a *admin) renew(rw http.ResponseWriter, r *http.Request, key string) {
+	c, err := r.Cookie(sessionCookie)
+	if err != nil {
+		return
+	}
+	now := a.now()
+	a.mu.Lock()
+	s, ok := a.sessions[key]
+	stale := ok && s.Expires.Sub(now) < sessionTTL-24*time.Hour
+	if stale {
+		s.Expires = now.Add(sessionTTL)
+		a.saveLocked()
+	}
+	a.mu.Unlock()
+	if stale {
+		setSessionCookie(rw, c.Value, int(sessionTTL.Seconds()))
+	}
+}
+
+func setSessionCookie(rw http.ResponseWriter, value string, maxAge int) {
+	http.SetCookie(rw, &http.Cookie{
+		Name: sessionCookie, Value: value, Path: "/admin", MaxAge: maxAge,
+		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
+	})
 }
 
 func (a *admin) login(rw http.ResponseWriter, r *http.Request) {
@@ -141,6 +287,7 @@ func (a *admin) login(rw http.ResponseWriter, r *http.Request) {
 	f := a.fails[k]
 	a.mu.Unlock()
 	if now.Before(f.until) {
+		a.record(r, true, "Вход отклонён: IP заблокирован после неверных паролей", "")
 		rw.Header().Set("Retry-After", strconv.Itoa(int(f.until.Sub(now).Seconds())+1))
 		http.Error(rw, "too many attempts", http.StatusTooManyRequests)
 		return
@@ -161,6 +308,11 @@ func (a *admin) login(rw http.ResponseWriter, r *http.Request) {
 		}
 		a.fails[k] = f
 		a.mu.Unlock()
+		if f.n == 0 {
+			a.record(r, true, "Неверный пароль, вход заблокирован на 15 минут", "")
+		} else {
+			a.record(r, true, "Неверный пароль", "")
+		}
 		http.Error(rw, "wrong password", http.StatusUnauthorized)
 		return
 	}
@@ -169,27 +321,29 @@ func (a *admin) login(rw http.ResponseWriter, r *http.Request) {
 	sid := base64.RawURLEncoding.EncodeToString(raw)
 	a.mu.Lock()
 	delete(a.fails, k)
-	for id, exp := range a.sessions {
-		if now.After(exp) {
-			delete(a.sessions, id)
+	for key, s := range a.sessions {
+		if now.After(s.Expires) {
+			delete(a.sessions, key)
 		}
 	}
-	a.sessions[sid] = now.Add(sessionTTL)
+	agent := agentLabel(r.UserAgent())
+	a.sessions[sessionKey(sid)] = &session{Expires: now.Add(sessionTTL), Created: now, LastSeen: now, IP: remoteIP(r).String(), Agent: agent, PW: passwordTag(a.w.o.PasswordHash())}
+	a.saveLocked()
 	a.mu.Unlock()
-	http.SetCookie(rw, &http.Cookie{
-		Name: sessionCookie, Value: sid, Path: "/admin", MaxAge: int(sessionTTL.Seconds()),
-		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
-	})
+	a.record(r, false, "Вход в админку", agent)
+	setSessionCookie(rw, sid, int(sessionTTL.Seconds()))
 	writeJSON(rw, map[string]bool{"ok": true})
 }
 
 func (a *admin) logout(rw http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		a.mu.Lock()
-		delete(a.sessions, c.Value)
+		delete(a.sessions, sessionKey(c.Value))
+		a.saveLocked()
 		a.mu.Unlock()
 	}
-	http.SetCookie(rw, &http.Cookie{Name: sessionCookie, Value: "", Path: "/admin", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
+	a.record(r, false, "Выход из админки", "")
+	setSessionCookie(rw, "", -1)
 	writeJSON(rw, map[string]bool{"ok": true})
 }
 
@@ -274,16 +428,73 @@ func (a *admin) clients(rw http.ResponseWriter, r *http.Request) {
 
 type deviceRow struct {
 	access.Device
-	SetupURL string `json:"setup_url"`
+	SetupURL string    `json:"setup_url"`
+	Online   bool      `json:"online"`
+	Active   int       `json:"active"`
+	Conns    uint64    `json:"conns"`
+	Up       uint64    `json:"up"`
+	Down     uint64    `json:"down"`
+	Hosts    []string  `json:"hosts"`
+	LastUsed time.Time `json:"last_used,omitempty"`
+}
+
+var kinds = map[string]string{
+	"iphone": "iPhone", "ipad": "iPad", "mac": "Mac", "android": "Android", "windows": "Windows", "other": "Устройство",
 }
 
 func (a *admin) devices(rw http.ResponseWriter, r *http.Request) {
+	stats := map[string]proxy.ClientStat{}
+	if a.w.o.Proxy != nil {
+		for _, s := range a.w.o.Proxy.ClientStats() {
+			stats[s.Prefix] = s
+		}
+	}
+	now := a.now()
 	ds := a.w.o.Access.Devices()
 	out := make([]deviceRow, 0, len(ds))
 	for _, d := range ds {
-		out = append(out, deviceRow{Device: d, SetupURL: a.setupURL(d.Token)})
+		row := deviceRow{Device: d, SetupURL: a.setupURL(d.Token), Hosts: []string{}, LastUsed: d.LastSeen}
+		seen := map[string]bool{}
+		for _, ip := range d.IPs {
+			s, ok := stats[ip]
+			if !ok {
+				continue
+			}
+			row.Active += s.Active
+			row.Conns += s.Total
+			row.Up += s.Up
+			row.Down += s.Down
+			if s.LastSeen.After(row.LastUsed) {
+				row.LastUsed = s.LastSeen
+			}
+			for _, h := range s.Hosts {
+				if !seen[h] && len(row.Hosts) < 8 {
+					seen[h] = true
+					row.Hosts = append(row.Hosts, h)
+				}
+			}
+		}
+		row.Online = row.Active > 0 || now.Sub(row.LastUsed) < 2*time.Minute
+		out = append(out, row)
 	}
 	writeJSON(rw, out)
+}
+
+func (a *admin) qr(rw http.ResponseWriter, r *http.Request) {
+	tok := r.URL.Query().Get("token")
+	if _, ok := a.w.o.Access.ValidToken(tok); !ok {
+		http.NotFound(rw, r)
+		return
+	}
+	code, err := qr.Encode(a.setupURL(tok), qr.M)
+	if err != nil {
+		http.Error(rw, "qr", http.StatusInternalServerError)
+		return
+	}
+	code.Scale = 8
+	rw.Header().Set("Content-Type", "image/png")
+	rw.Header().Set("Cache-Control", "no-store")
+	_, _ = rw.Write(code.PNG())
 }
 
 func (a *admin) setupURL(tok string) string {
@@ -316,25 +527,86 @@ func newToken() string {
 
 func (a *admin) addDevice(rw http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name string `json:"name"`
+		Owner string `json:"owner"`
+		Kind  string `json:"kind"`
+		Name  string `json:"name"`
 	}
 	if err := decode(r, &body); err != nil {
 		http.Error(rw, "bad request", http.StatusBadRequest)
 		return
 	}
+	owner := strings.TrimSpace(body.Owner)
+	if owner == "" {
+		owner = access.Owner
+	}
+	if len([]rune(owner)) > 30 {
+		http.Error(rw, "имя человека до 30 символов", http.StatusBadRequest)
+		return
+	}
+	label, ok := kinds[body.Kind]
+	if !ok {
+		body.Kind, label = "other", kinds["other"]
+	}
 	name := strings.TrimSpace(body.Name)
-	if name == "" || len([]rune(name)) > 40 {
-		http.Error(rw, "имя от 1 до 40 символов", http.StatusBadRequest)
+	if name == "" {
+		name = label
+	}
+	if len([]rune(name)) > 40 {
+		http.Error(rw, "название до 40 символов", http.StatusBadRequest)
 		return
 	}
 	tok := newToken()
 	if !a.update(rw, func(d *state.Data) error {
-		d.Tokens = append(d.Tokens, state.Token{Name: name, Token: tok, Created: a.now()})
+		d.Tokens = append(d.Tokens, state.Token{Name: name, Owner: owner, Kind: body.Kind, Token: tok, Created: a.now()})
 		return nil
 	}) {
 		return
 	}
-	writeJSON(rw, map[string]string{"name": name, "token": tok, "setup_url": a.setupURL(tok)})
+	a.record(r, false, "Добавлено устройство", owner+" · "+name)
+	writeJSON(rw, map[string]string{"name": name, "owner": owner, "kind": body.Kind, "token": tok, "setup_url": a.setupURL(tok)})
+}
+
+func (a *admin) revokeOwner(rw http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Owner string `json:"owner"`
+	}
+	if err := decode(r, &body); err != nil || body.Owner == "" {
+		http.Error(rw, "bad request", http.StatusBadRequest)
+		return
+	}
+	if body.Owner == access.Owner {
+		http.Error(rw, "Все свои устройства разом отключить нельзя: потеряешь доступ к DNS и админке. Отключай по одному.", http.StatusConflict)
+		return
+	}
+	var tokens []string
+	for _, d := range a.w.o.Access.Devices() {
+		if d.Owner == body.Owner {
+			tokens = append(tokens, d.Token)
+		}
+	}
+	if !a.update(rw, func(d *state.Data) error {
+		drop := map[string]bool{}
+		for _, t := range tokens {
+			drop[t] = true
+		}
+		kept := d.Tokens[:0]
+		for _, t := range d.Tokens {
+			if drop[t.Token] {
+				delete(drop, t.Token)
+				continue
+			}
+			kept = append(kept, t)
+		}
+		d.Tokens = kept
+		for t := range drop {
+			d.Revoked = append(d.Revoked, t)
+		}
+		return nil
+	}) {
+		return
+	}
+	a.record(r, false, "Отключены все устройства", body.Owner)
+	writeJSON(rw, map[string]any{"ok": true, "revoked": len(tokens)})
 }
 
 func (a *admin) revokeDevice(rw http.ResponseWriter, r *http.Request) {
@@ -343,6 +615,20 @@ func (a *admin) revokeDevice(rw http.ResponseWriter, r *http.Request) {
 	}
 	if err := decode(r, &body); err != nil || body.Token == "" {
 		http.Error(rw, "bad request", http.StatusBadRequest)
+		return
+	}
+	label, mine, own := "?", false, 0
+	for _, d := range a.w.o.Access.Devices() {
+		if d.Owner == access.Owner {
+			own++
+		}
+		if d.Token == body.Token {
+			label = d.Owner + " · " + d.Name
+			mine = d.Owner == access.Owner
+		}
+	}
+	if mine && own <= 1 {
+		http.Error(rw, "Это твоё последнее устройство. Отключишь — сам потеряешь доступ к DNS и админке. Сначала добавь новое.", http.StatusConflict)
 		return
 	}
 	if !a.update(rw, func(d *state.Data) error {
@@ -363,6 +649,7 @@ func (a *admin) revokeDevice(rw http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
+	a.record(r, false, "Отключено устройство", label)
 	writeJSON(rw, map[string]bool{"ok": true})
 }
 
@@ -415,6 +702,11 @@ func (a *admin) ban(rw http.ResponseWriter, r *http.Request) {
 	if a.w.o.Proxy != nil {
 		n = a.w.o.Proxy.Disconnect(p)
 	}
+	detail := p.String()
+	if reason := strings.TrimSpace(body.Reason); reason != "" {
+		detail += " · " + reason
+	}
+	a.record(r, true, "Бан", detail)
 	writeJSON(rw, map[string]any{"ok": true, "prefix": p.String(), "closed": n})
 }
 
@@ -438,6 +730,7 @@ func (a *admin) unban(rw http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
+	a.record(r, false, "Бан снят", body.Prefix)
 	writeJSON(rw, map[string]bool{"ok": true})
 }
 
@@ -459,6 +752,7 @@ func (a *admin) kick(rw http.ResponseWriter, r *http.Request) {
 	if a.w.o.Proxy != nil {
 		n = a.w.o.Proxy.Disconnect(p)
 	}
+	a.record(r, false, "Клиент отключён", p.String())
 	writeJSON(rw, map[string]any{"ok": true, "closed": n})
 }
 
@@ -477,20 +771,117 @@ func (a *admin) settings(rw http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
+	if *body.StrictProxy {
+		a.record(r, false, "Прокси только для своих: включено", "")
+	} else {
+		a.record(r, false, "Прокси только для своих: выключено", "")
+	}
 	writeJSON(rw, map[string]bool{"ok": true, "strict": a.w.o.Access.Strict()})
 }
 
 func (a *admin) log(rw http.ResponseWriter, r *http.Request) {
-	var entries []stats.Entry
+	entries := []stats.Entry{}
 	if a.w.o.Stats != nil {
-		n, _ := strconv.Atoi(r.URL.Query().Get("n"))
-		if n <= 0 || n > 500 {
-			n = 200
-		}
-		entries = a.w.o.Stats.Log().Recent(n, r.URL.Query().Get("q"))
+		entries = append(entries, a.w.o.Stats.Log().Recent(limit(r), r.URL.Query().Get("q"))...)
 	}
 	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
 		entries[i], entries[j] = entries[j], entries[i]
 	}
 	writeJSON(rw, entries)
+}
+
+func limit(r *http.Request) int {
+	n, _ := strconv.Atoi(r.URL.Query().Get("n"))
+	if n <= 0 || n > 500 {
+		n = 200
+	}
+	return n
+}
+
+func (a *admin) conns(rw http.ResponseWriter, r *http.Request) {
+	var out []stats.Conn
+	if a.w.o.Stats != nil {
+		out = a.w.o.Stats.Conns().Recent(limit(r), r.URL.Query().Get("q"))
+	}
+	if out == nil {
+		out = []stats.Conn{}
+	}
+	writeJSON(rw, out)
+}
+
+func (a *admin) auditLog(rw http.ResponseWriter, r *http.Request) {
+	out := a.w.o.Audit.Recent(limit(r), r.URL.Query().Get("q"))
+	if out == nil {
+		out = []audit.Entry{}
+	}
+	writeJSON(rw, out)
+}
+
+type sessionRow struct {
+	ID       string    `json:"id"`
+	IP       string    `json:"ip"`
+	Agent    string    `json:"agent"`
+	Created  time.Time `json:"created"`
+	LastSeen time.Time `json:"last_seen"`
+	Current  bool      `json:"current"`
+}
+
+func (a *admin) listSessions(rw http.ResponseWriter, r *http.Request) {
+	cur, _ := a.session(r)
+	now := a.now()
+	a.mu.Lock()
+	out := make([]sessionRow, 0, len(a.sessions))
+	tag := passwordTag(a.w.o.PasswordHash())
+	for key, s := range a.sessions {
+		if now.After(s.Expires) || s.PW != tag {
+			continue
+		}
+		out = append(out, sessionRow{ID: sessionID(key), IP: s.IP, Agent: s.Agent, Created: s.Created, LastSeen: s.LastSeen, Current: key == cur})
+	}
+	a.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool { return out[i].LastSeen.After(out[j].LastSeen) })
+	writeJSON(rw, out)
+}
+
+func (a *admin) endSession(rw http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ID string `json:"id"`
+	}
+	if err := decode(r, &body); err != nil || body.ID == "" {
+		http.Error(rw, "bad request", http.StatusBadRequest)
+		return
+	}
+	cur, _ := a.session(r)
+	ended := ""
+	a.mu.Lock()
+	for key, s := range a.sessions {
+		if sessionID(key) == body.ID && key != cur {
+			ended = s.Agent + " · " + s.IP
+			delete(a.sessions, key)
+		}
+	}
+	a.saveLocked()
+	a.mu.Unlock()
+	if ended == "" {
+		http.Error(rw, "нет такой сессии", http.StatusNotFound)
+		return
+	}
+	a.record(r, false, "Сессия завершена", ended)
+	writeJSON(rw, map[string]bool{"ok": true})
+}
+
+func (a *admin) endOtherSessions(rw http.ResponseWriter, r *http.Request) {
+	cur, _ := a.session(r)
+	n := 0
+	a.mu.Lock()
+	for key := range a.sessions {
+		if key != cur {
+			delete(a.sessions, key)
+			n++
+		}
+	}
+	a.saveLocked()
+	a.mu.Unlock()
+	a.record(r, false, "Завершены все остальные сессии", strconv.Itoa(n))
+	writeJSON(rw, map[string]int{"ended": n})
 }

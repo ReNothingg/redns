@@ -132,7 +132,11 @@ func (r *Resolver) resolveIN(ctx context.Context, req *dns.Msg, q dns.Question, 
 			if r.hinter != nil {
 				r.hinter.Hint(c.IP, name)
 			}
-			return r.addrReply(req, q, r.opt.IPv4, r.opt.IPv6, r.opt.AnswerTTL), "proxy"
+			v6 := r.opt.IPv6
+			if c.IP.Unmap().Is4() {
+				v6 = netip.Addr{}
+			}
+			return r.addrReply(req, q, r.opt.IPv4, v6, r.opt.AnswerTTL), "proxy"
 		case dns.TypeHTTPS, dns.TypeSVCB:
 
 			return nodata(req, q.Name, r.opt.AnswerTTL), "proxy"

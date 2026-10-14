@@ -1,0 +1,100 @@
+.hero {
+  padding: 32px 28px;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 4px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.state .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.state.ok {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.state.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.state.bad {
+  background: var(--down-soft);
+  color: var(--down);
+}
+
+.state.wait .dot {
+  animation: blink 1.2s ease-in-out infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+h1 {
+  font-size: clamp(36px, 10vw, 48px);
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin-top: 18px;
+}
+
+.lede {
+  margin-top: 14px;
+  color: var(--muted);
+  max-width: 32em;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 22px;
+  font-size: 13px;
+}
+
+.facts div {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  font-family: var(--mono);
+}
+
+.facts:empty {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .hero {
+    padding: 26px 20px;
+  }
+}

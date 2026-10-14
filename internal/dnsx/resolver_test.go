@@ -319,3 +319,27 @@ func TestSameQuestion(t *testing.T) {
 		t.Fatal("reply for another type accepted")
 	}
 }
+
+func TestProxyAnswerKeepsClientAddressFamily(t *testing.T) {
+	r, _, _, _ := newTestResolver(t, "public")
+	r.opt.IPv6 = netip.MustParseAddr("2001:db8::10")
+	ctx := context.Background()
+
+	m := r.Resolve(ctx, query("chatgpt.com", dns.TypeAAAA), client)
+	if len(m.Answer) != 0 {
+		t.Fatalf("DNS over IPv4 must not get the IPv6 proxy address, or the phone connects from another IP: %v", m)
+	}
+	if got := firstA(t, r.Resolve(ctx, query("chatgpt.com", dns.TypeA), client)); got != "203.0.113.10" {
+		t.Fatalf("A over IPv4 = %q", got)
+	}
+	v6 := Client{IP: netip.MustParseAddr("2001:db8:46::5"), Proto: "doh"}
+	if got := firstA(t, r.Resolve(ctx, query("chatgpt.com", dns.TypeAAAA), v6)); got != "2001:db8::10" {
+		t.Fatalf("AAAA over IPv6 = %q", got)
+	}
+	if got := firstA(t, r.Resolve(ctx, query("chatgpt.com", dns.TypeA), v6)); got != "203.0.113.10" {
+		t.Fatalf("A over IPv6 = %q", got)
+	}
+	if got := firstA(t, r.Resolve(ctx, query("dns.example.com", dns.TypeAAAA), client)); got != "2001:db8::10" {
+		t.Fatalf("own name keeps both families, got %q", got)
+	}
+}

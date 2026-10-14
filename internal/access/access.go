@@ -14,6 +14,8 @@ import (
 
 type tokenInfo struct {
 	name    string
+	owner   string
+	kind    string
 	source  string
 	created time.Time
 }
@@ -41,6 +43,8 @@ type strikes struct {
 	until time.Time
 }
 
+const Owner = "Я"
+
 const (
 	maxStrikes    = 10
 	strikeWindow  = 10 * time.Minute
@@ -55,7 +59,10 @@ type Access struct {
 	clients map[netip.Prefix]*entry
 	bad     map[netip.Prefix]*strikes
 	now     func() time.Time
+	onBlock func(netip.Prefix)
 }
+
+func (a *Access) OnBlock(fn func(netip.Prefix)) { a.onBlock = fn }
 
 func New(host string, cfg config.Access, st state.Data) *Access {
 	a := &Access{
@@ -84,12 +91,16 @@ func (a *Access) Update(cfg config.Access, st state.Data) {
 	}
 	for _, t := range cfg.Tokens {
 		if !revoked[t.Token] {
-			r.tokens[t.Token] = tokenInfo{name: t.Name, source: "config"}
+			r.tokens[t.Token] = tokenInfo{name: t.Name, owner: Owner, source: "config"}
 		}
 	}
 	for _, t := range st.Tokens {
 		if !revoked[t.Token] {
-			r.tokens[t.Token] = tokenInfo{name: t.Name, source: "panel", created: t.Created}
+			owner := t.Owner
+			if owner == "" {
+				owner = Owner
+			}
+			r.tokens[t.Token] = tokenInfo{name: t.Name, owner: owner, kind: t.Kind, source: "panel", created: t.Created}
 		}
 	}
 	for _, c := range cfg.AllowCIDRs {
@@ -232,18 +243,23 @@ func (a *Access) Strike(ip netip.Addr) {
 	k := Key(ip)
 	now := a.now()
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	s := a.bad[k]
 	if s == nil || now.Sub(s.first) > strikeWindow {
 		if len(a.bad) > 100000 {
+			a.mu.Unlock()
 			return
 		}
 		s = &strikes{first: now}
 		a.bad[k] = s
 	}
 	s.n++
+	blocked := s.n == maxStrikes
 	if s.n >= maxStrikes {
 		s.until = now.Add(strikePenalty)
+	}
+	a.mu.Unlock()
+	if blocked && a.onBlock != nil {
+		a.onBlock(k)
 	}
 }
 
@@ -267,10 +283,15 @@ func (a *Access) Trusted(ip netip.Addr) bool {
 			return true
 		}
 	}
+	r := a.rules.Load()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	e := a.clients[Key(ip)]
-	return e != nil && e.token != "" && a.now().Before(e.authUntil)
+	return e != nil && e.token != "" && r.tokens[e.token].owner == Owner && a.now().Before(e.authUntil)
+}
+
+func (a *Access) TokenOwner(tok string) string {
+	return a.rules.Load().tokens[tok].owner
 }
 
 func (a *Access) Touch(ip netip.Addr, proto string) {
@@ -328,6 +349,8 @@ func (a *Access) Clients() []Client {
 
 type Device struct {
 	Name     string    `json:"name"`
+	Owner    string    `json:"owner"`
+	Kind     string    `json:"kind,omitempty"`
 	Token    string    `json:"token"`
 	Source   string    `json:"source"`
 	Created  time.Time `json:"created,omitempty"`
@@ -340,7 +363,7 @@ func (a *Access) Devices() []Device {
 	r := a.rules.Load()
 	byToken := map[string]*Device{}
 	for tok, info := range r.tokens {
-		byToken[tok] = &Device{Name: info.name, Token: tok, Source: info.source, Created: info.created, IPs: []string{}}
+		byToken[tok] = &Device{Name: info.name, Owner: info.owner, Kind: info.kind, Token: tok, Source: info.source, Created: info.created, IPs: []string{}}
 	}
 	a.mu.Lock()
 	for k, e := range a.clients {
@@ -360,7 +383,12 @@ func (a *Access) Devices() []Device {
 		sort.Strings(d.IPs)
 		out = append(out, *d)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Owner != out[j].Owner {
+			return out[i].Owner == Owner || (out[j].Owner != Owner && out[i].Owner < out[j].Owner)
+		}
+		return out[i].Name < out[j].Name
+	})
 	return out
 }
 

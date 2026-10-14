@@ -12,6 +12,8 @@ import (
 
 type Token struct {
 	Name    string    `json:"name"`
+	Owner   string    `json:"owner,omitempty"`
+	Kind    string    `json:"kind,omitempty"`
 	Token   string    `json:"token"`
 	Created time.Time `json:"created"`
 }

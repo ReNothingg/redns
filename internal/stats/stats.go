@@ -32,11 +32,12 @@ type Stats struct {
 	topMu sync.Mutex
 	top   map[string]uint64
 
-	log *QueryLog
+	log   *QueryLog
+	conns *ConnLog
 }
 
 func New(queryLogSize int) *Stats {
-	return &Stats{Started: time.Now(), top: map[string]uint64{}, log: NewQueryLog(queryLogSize)}
+	return &Stats{Started: time.Now(), top: map[string]uint64{}, log: NewQueryLog(queryLogSize), conns: NewConnLog(queryLogSize)}
 }
 
 func (s *Stats) Proto(p string) {
@@ -53,7 +54,8 @@ func (s *Stats) ProxiedConn(name string) {
 	s.topMu.Unlock()
 }
 
-func (s *Stats) Log() *QueryLog { return s.log }
+func (s *Stats) Log() *QueryLog  { return s.log }
+func (s *Stats) Conns() *ConnLog { return s.conns }
 
 type Count struct {
 	Name  string `json:"name"`
@@ -186,6 +188,67 @@ func (l *QueryLog) Recent(n int, filter string) []Entry {
 	}
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+type Conn struct {
+	Time   time.Time `json:"time"`
+	Client string    `json:"client"`
+	Device string    `json:"device,omitempty"`
+	Host   string    `json:"host"`
+	Port   int       `json:"port"`
+	Up     uint64    `json:"up"`
+	Down   uint64    `json:"down"`
+	Ms     int64     `json:"ms"`
+	Err    string    `json:"err,omitempty"`
+}
+
+type ConnLog struct {
+	mu   sync.Mutex
+	buf  []Conn
+	next int
+	full bool
+}
+
+func NewConnLog(size int) *ConnLog {
+	if size <= 0 {
+		return &ConnLog{}
+	}
+	return &ConnLog{buf: make([]Conn, size)}
+}
+
+func (l *ConnLog) Add(c Conn) {
+	if l == nil || len(l.buf) == 0 {
+		return
+	}
+	l.mu.Lock()
+	l.buf[l.next] = c
+	l.next = (l.next + 1) % len(l.buf)
+	if l.next == 0 {
+		l.full = true
+	}
+	l.mu.Unlock()
+}
+
+func (l *ConnLog) Recent(n int, q string) []Conn {
+	if l == nil || len(l.buf) == 0 {
+		return nil
+	}
+	q = strings.ToLower(q)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	size := l.next
+	if l.full {
+		size = len(l.buf)
+	}
+	out := make([]Conn, 0, min(n, size))
+	for i := 0; i < size && len(out) < n; i++ {
+		c := l.buf[(l.next-1-i+len(l.buf))%len(l.buf)]
+		if q != "" && !strings.Contains(strings.ToLower(c.Host+" "+c.Client+" "+c.Device), q) {
+			continue
+		}
+		out = append(out, c)
 	}
 	return out
 }

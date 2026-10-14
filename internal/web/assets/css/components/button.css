@@ -1,0 +1,89 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 0;
+  cursor: pointer;
+  font-weight: 600;
+  background: var(--accent);
+  color: var(--on-accent);
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background-color 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn:hover {
+  background: var(--accent-hover);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+
+.btn svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.btn.sm {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+.btn.lg {
+  height: 48px;
+  padding: 0 24px;
+  font-size: 16px;
+}
+
+.btn.ghost {
+  background: var(--raised);
+  color: var(--fg);
+}
+
+.btn.ghost:hover {
+  background: var(--raised-hover);
+}
+
+.btn.danger {
+  background: var(--down-soft);
+  color: var(--down);
+}
+
+.btn.danger:hover {
+  background: var(--down-hover);
+}
+
+.btn.red {
+  background: var(--down);
+  color: #fff;
+}
+
+.btn.red:hover {
+  background: var(--down);
+  filter: brightness(1.08);
+}
+
+.btn.warn {
+  background: var(--warn);
+  color: var(--on-warn);
+}
+
+.btn.warn:hover {
+  background: var(--warn);
+  filter: brightness(1.08);
+}
