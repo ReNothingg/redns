@@ -806,6 +806,7 @@ func (a *admin) conns(rw http.ResponseWriter, r *http.Request) {
 	if out == nil {
 		out = []stats.Conn{}
 	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Time.After(out[j].Time) })
 	writeJSON(rw, out)
 }
 
