@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || date +%Y.%m.%d)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test demo dist deploy clean
+.PHONY: build test dist deploy clean
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/redns ./cmd/redns
@@ -9,9 +9,6 @@ build:
 test:
 	go vet ./...
 	go test -race ./...
-
-demo:
-	REDNS_DEMO=127.0.0.1:8099 go test ./internal/web -run TestDemo -count=1 -timeout 0 -v
 
 dist:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" -o dist/redns-linux-amd64 ./cmd/redns
