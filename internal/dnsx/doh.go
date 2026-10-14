@@ -18,6 +18,7 @@ import (
 type DoH struct {
 	R      *Resolver
 	Access *access.Access
+	FP     *Fingerprints
 }
 
 const dohPath = "/dns-query"
@@ -73,7 +74,7 @@ func (d *DoH) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	resp := d.R.Resolve(ctx, req, Client{IP: ip, Proto: "doh", Token: tok})
+	resp := d.R.Resolve(ctx, req, Client{IP: ip, Proto: "doh", Token: tok, FP: d.FP.Get(r.RemoteAddr)})
 	if resp == nil {
 		resp = rcode(req, dns.RcodeRefused)
 	}

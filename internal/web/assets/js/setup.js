@@ -29,7 +29,7 @@
           : /Windows/.test(ua)
             ? "win"
             : null;
-  if (dev) pick(dev);
+  if (dev && document.querySelector('.tabs [data-t="' + dev + '"]')) pick(dev);
 
   document.querySelectorAll("[data-copy]").forEach(function (b) {
     b.addEventListener("click", function () {

@@ -203,6 +203,7 @@ func (a *admin) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		"devices/add":          {http.MethodPost, a.addDevice},
 		"devices/revoke":       {http.MethodPost, a.revokeDevice},
 		"devices/revoke-owner": {http.MethodPost, a.revokeOwner},
+		"devices/reset":        {http.MethodPost, a.resetDevice},
 		"qr":                   {http.MethodGet, a.qr},
 		"bans/add":             {http.MethodPost, a.ban},
 		"bans/remove":          {http.MethodPost, a.unban},
@@ -616,6 +617,29 @@ func (a *admin) revokeOwner(rw http.ResponseWriter, r *http.Request) {
 	}
 	a.record(r, false, "Отключены все устройства", body.Owner)
 	writeJSON(rw, map[string]any{"ok": true, "revoked": len(tokens)})
+}
+
+func (a *admin) resetDevice(rw http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := decode(r, &body); err != nil || body.Token == "" {
+		http.Error(rw, "bad request", http.StatusBadRequest)
+		return
+	}
+	label := ""
+	for _, d := range a.w.o.Access.Devices() {
+		if d.Token == body.Token {
+			label = d.Owner + " · " + d.Name
+		}
+	}
+	if label == "" {
+		http.Error(rw, "нет такого устройства", http.StatusNotFound)
+		return
+	}
+	a.w.o.Access.ResetUsage(body.Token)
+	a.record(r, false, "Сброшены клиенты и сети устройства", label)
+	writeJSON(rw, map[string]bool{"ok": true})
 }
 
 func (a *admin) revokeDevice(rw http.ResponseWriter, r *http.Request) {

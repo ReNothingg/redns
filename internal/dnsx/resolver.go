@@ -21,6 +21,7 @@ type Client struct {
 	Proto string
 
 	Token string
+	FP    string
 }
 
 func (c Client) plain() bool { return c.Proto == "udp" || c.Proto == "tcp" }
@@ -71,7 +72,7 @@ func (r *Resolver) Resolve(ctx context.Context, req *dns.Msg, c Client) *dns.Msg
 	r.stats.Proto(c.Proto)
 	if c.Token != "" {
 		r.access.Authorize(c.IP, c.Token)
-		r.access.Seen(c.IP, c.Token)
+		r.access.Seen(c.IP, c.Token, c.FP)
 	}
 	if !r.access.Allowed(c.IP) {
 		r.stats.Refused.Add(1)

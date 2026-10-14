@@ -139,7 +139,21 @@ type pageData struct {
 	Assets           string
 	Icons            template.HTML
 	Admin            bool
+	Only             string
 }
+
+var kindTabs = map[string]string{"iphone": "ios", "ipad": "ios", "mac": "mac", "android": "android", "windows": "win"}
+
+func (d pageData) Tab(t string) bool { return d.Only == "" || d.Only == t }
+
+func (d pageData) Active(t string) bool {
+	if d.Only != "" {
+		return d.Only == t
+	}
+	return t == "ios"
+}
+
+func (d pageData) Addresses() bool { return d.Only == "" || d.Only == "win" || d.Only == "android" }
 
 func (w *Web) data(tok string) pageData {
 	d := pageData{
@@ -156,6 +170,7 @@ func (w *Web) data(tok string) pageData {
 			d.AndroidDoT = tok + "." + w.o.Host
 		}
 		d.TokenName = w.o.Access.TokenName(tok)
+		d.Only = kindTabs[w.o.Access.TokenKind(tok)]
 		d.Admin = w.admin.enabled() && w.o.Access.TokenOwner(tok) == access.Owner
 		d.DoHURL += "/" + tok
 		d.ProfileBase = "/setup/" + tok
@@ -217,6 +232,10 @@ func (w *Web) setup(rw http.ResponseWriter, r *http.Request) {
 		}
 		render(rw, setupTmpl, d)
 	case "redns.mobileconfig", "redns-doh.mobileconfig", "redns-dot.mobileconfig":
+		if d.Only == "android" || d.Only == "win" {
+			http.NotFound(rw, r)
+			return
+		}
 		p := ProfileParams{Host: w.o.Host, Label: d.TokenName, DoHURL: d.DoHURL, DoTName: d.DoTHost, Consent: Agreement(w.o.Host)}
 		for _, a := range []string{w.o.IPv4, w.o.IPv6} {
 			if a != "" {

@@ -24,6 +24,7 @@ type Handler struct {
 	Access  *access.Access
 	Limiter *Limiter
 	Proto   string
+	FP      *Fingerprints
 }
 
 func addrOf(a net.Addr) netip.Addr {
@@ -54,6 +55,7 @@ func (h *Handler) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 		if cs, ok := w.(dns.ConnectionStater); ok {
 			if st := cs.ConnectionState(); st != nil {
 				c.Token = h.Access.TokenFromSNI(ip, st.ServerName)
+				c.FP = h.FP.Get(w.RemoteAddr().String())
 			}
 		}
 	}
@@ -98,8 +100,8 @@ func PlainServers(addr string, r *Resolver, acc *access.Access, lim *Limiter) ([
 	return []*dns.Server{udp, tcp}, nil
 }
 
-func DoTServer(addr string, tlsConf *tls.Config, r *Resolver, acc *access.Access) (*dns.Server, error) {
-	tc := tlsConf.Clone()
+func DoTServer(addr string, tlsConf *tls.Config, r *Resolver, acc *access.Access, fp *Fingerprints) (*dns.Server, error) {
+	tc := fp.Wrap(tlsConf)
 	tc.NextProtos = []string{"dot"}
 	ln, err := tls.Listen("tcp", addr, tc)
 	if err != nil {
@@ -108,7 +110,7 @@ func DoTServer(addr string, tlsConf *tls.Config, r *Resolver, acc *access.Access
 	s := &dns.Server{Listener: ln, Net: "tcp-tls", MaxTCPQueries: -1,
 		ReadTimeout: 10 * time.Second,
 		IdleTimeout: func() time.Duration { return 60 * time.Second },
-		Handler:     &Handler{R: r, Access: acc, Proto: "dot"}}
+		Handler:     &Handler{R: r, Access: acc, Proto: "dot", FP: fp}}
 	go func() {
 		if err := s.ActivateAndServe(); err != nil {
 			slog.Error("dot server stopped", "err", err)

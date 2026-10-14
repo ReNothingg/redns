@@ -76,6 +76,17 @@
     if (n < 60000) return (n / 1000).toFixed(n < 10000 ? 1 : 0) + " с";
     return duration(Math.round(n / 1000));
   }
+  function plural(n, one, few, many) {
+    var m10 = n % 10,
+      m100 = n % 100;
+    var w =
+      m10 === 1 && m100 !== 11
+        ? one
+        : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)
+          ? few
+          : many;
+    return n + " " + w;
+  }
   function num(n) {
     return (n || 0).toLocaleString("ru-RU");
   }
@@ -671,10 +682,18 @@
       );
       var table = el("div", "table");
       devs.forEach(function (d) {
+        var shared = d.clients > 1 || d.networks > 4;
         var t = add(
           el("div", "title"),
           el("span", null, d.name),
           d.online ? el("span", "badge own", "онлайн") : null,
+          shared
+            ? el(
+                "span",
+                "badge stranger",
+                "похоже, ключ не на одном устройстве",
+              )
+            : null,
         );
         var meta = add(
           el("div", "meta"),
@@ -688,8 +707,43 @@
           d.down || d.up
             ? el("span", null, "↓ " + bytes(d.down) + "  ↑ " + bytes(d.up))
             : null,
+          d.networks > 1
+            ? el(
+                "span",
+                null,
+                plural(d.networks, "сеть", "сети", "сетей") + " за сутки",
+              )
+            : null,
+          d.clients > 1
+            ? el(
+                "span",
+                null,
+                plural(d.clients, "клиент", "клиента", "клиентов"),
+              )
+            : null,
         );
         var body = add(el("div", "grow"), t, meta);
+        if (shared) {
+          var reset = el("button", "btn sm ghost", "Это мои, сбросить");
+          reset.addEventListener("click", function () {
+            api("POST", "devices/reset", { token: d.token })
+              .then(refreshPeople)
+              .catch(fail);
+          });
+          body.appendChild(
+            add(
+              el("div", "meta"),
+              el(
+                "span",
+                null,
+                d.clients > 1
+                  ? "Ключом пользуются разные системы или программы. Если это не обновление и не твой второй браузер, ключ поставили куда-то ещё."
+                  : "Ключ приходил из многих сетей за сутки. Возможно, им поделились.",
+              ),
+              reset,
+            ),
+          );
+        }
         if (d.hosts.length)
           body.appendChild(el("div", "hosts", d.hosts.join("  ")));
         var qrb = el("button", "btn sm ghost", "QR и ссылка");

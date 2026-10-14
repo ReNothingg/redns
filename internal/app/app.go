@@ -46,6 +46,7 @@ type App struct {
 	hints    *proxy.Hints
 	proxy    *proxy.Proxy
 	certs    *certs.Manager
+	fp       *dnsx.Fingerprints
 
 	infos   atomic.Pointer[[]ListInfo]
 	reloadM sync.Mutex
@@ -79,6 +80,10 @@ func New(ctx context.Context, cfg *config.Config, version string) (*App, error) 
 	a.access.OnBlock(func(p netip.Prefix) {
 		a.audit.Warn("Подбор ключа: IP заблокирован на час", p.String(), "")
 	})
+	a.access.OnNewClient(func(label string, clients int) {
+		a.audit.Warn("Ключ используется ещё одним устройством или программой", "", fmt.Sprintf("%s · клиентов: %d", label, clients))
+	})
+	a.fp = dnsx.NewFingerprints()
 	a.fetcher = lists.NewFetcher(cfg.Resolve(cfg.Lists.CacheDir))
 
 	pol, infos, err := BuildPolicy(ctx, cfg, a.fetcher)
@@ -156,7 +161,7 @@ func (a *App) Start(ctx context.Context) error {
 	w := web.New(web.Options{
 		Host: cfg.Hostname, IPv4: cfg.PublicIPv4, IPv6: cfg.PublicIPv6,
 		Access:  a.access,
-		DoH:     &dnsx.DoH{R: a.res, Access: a.access},
+		DoH:     &dnsx.DoH{R: a.res, Access: a.access, FP: a.fp},
 		Version: a.version,
 		Info: func() web.Info {
 			p := a.res.Policy()
@@ -175,7 +180,7 @@ func (a *App) Start(ctx context.Context) error {
 
 	httpsSrv := &http.Server{
 		Handler:           w.HTTPS(),
-		TLSConfig:         a.certs.TLSConfig(),
+		TLSConfig:         a.fp.Wrap(a.certs.TLSConfig()),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		ErrorLog:          quietLog(),
@@ -211,7 +216,7 @@ func (a *App) Start(ctx context.Context) error {
 		a.dnsServers = append(a.dnsServers, s...)
 	}
 	if cfg.Listen.DoT != "" {
-		s, err := dnsx.DoTServer(cfg.Listen.DoT, a.certs.TLSConfig(), a.res, a.access)
+		s, err := dnsx.DoTServer(cfg.Listen.DoT, a.certs.TLSConfig(), a.res, a.access, a.fp)
 		if err != nil {
 			return fmt.Errorf("listen dot %s: %w", cfg.Listen.DoT, err)
 		}
@@ -258,6 +263,7 @@ func (a *App) maintenance(ctx context.Context) {
 			return
 		case <-gc.C:
 			a.access.GC()
+			a.fp.GC()
 			a.hints.GC()
 			a.proxy.GC()
 			a.proxy.GCLimiter()

@@ -48,9 +48,13 @@ type usage struct {
 	last    time.Time
 	queries uint64
 	ips     map[netip.Prefix]time.Time
+	clients map[string]time.Time
 }
 
-const maxDeviceIPs = 32
+const (
+	maxDeviceIPs     = 32
+	maxDeviceClients = 8
+)
 
 type strikes struct {
 	n     int
@@ -76,9 +80,12 @@ type Access struct {
 	bad     map[netip.Prefix]*strikes
 	now     func() time.Time
 	onBlock func(netip.Prefix)
+	onNew   func(label string, clients int)
 }
 
 func (a *Access) OnBlock(fn func(netip.Prefix)) { a.onBlock = fn }
+
+func (a *Access) OnNewClient(fn func(label string, clients int)) { a.onNew = fn }
 
 func New(host string, cfg config.Access, st state.Data) *Access {
 	a := &Access{
@@ -348,17 +355,17 @@ type Client struct {
 	Queries   uint64    `json:"queries"`
 }
 
-func (a *Access) Seen(ip netip.Addr, tok string) {
-	if _, ok := a.rules.Load().tokens[tok]; !ok {
+func (a *Access) Seen(ip netip.Addr, tok, fp string) {
+	info, ok := a.rules.Load().tokens[tok]
+	if !ok {
 		return
 	}
 	k := Key(ip)
 	now := a.now()
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	u := a.used[tok]
 	if u == nil {
-		u = &usage{ips: map[netip.Prefix]time.Time{}}
+		u = &usage{ips: map[netip.Prefix]time.Time{}, clients: map[string]time.Time{}}
 		a.used[tok] = u
 	}
 	u.last = now
@@ -366,6 +373,30 @@ func (a *Access) Seen(ip netip.Addr, tok string) {
 	if _, ok := u.ips[k]; ok || len(u.ips) < maxDeviceIPs {
 		u.ips[k] = now
 	}
+	fresh := false
+	if fp != "" {
+		if _, ok := u.clients[fp]; !ok && len(u.clients) < maxDeviceClients {
+			fresh = len(u.clients) > 0
+			u.clients[fp] = now
+		} else if ok {
+			u.clients[fp] = now
+		}
+	}
+	n := len(u.clients)
+	a.mu.Unlock()
+	if fresh && a.onNew != nil {
+		a.onNew(info.label(), n)
+	}
+}
+
+func (a *Access) ResetUsage(tok string) {
+	a.mu.Lock()
+	delete(a.used, tok)
+	a.mu.Unlock()
+}
+
+func (a *Access) TokenKind(tok string) string {
+	return a.rules.Load().tokens[tok].kind
 }
 
 func (a *Access) client(k netip.Prefix, e *entry) Client {
@@ -429,6 +460,8 @@ type Device struct {
 	LastSeen time.Time            `json:"last_seen,omitempty"`
 	IPs      []string             `json:"ips"`
 	Queries  uint64               `json:"queries"`
+	Networks int                  `json:"networks"`
+	Clients  int                  `json:"clients"`
 	IPSeen   map[string]time.Time `json:"-"`
 }
 
@@ -444,9 +477,12 @@ func (a *Access) Devices() []Device {
 		if d == nil {
 			continue
 		}
-		d.LastSeen, d.Queries = u.last, u.queries
+		d.LastSeen, d.Queries, d.Clients = u.last, u.queries, len(u.clients)
 		for k, at := range u.ips {
 			d.IPSeen[k.String()] = at
+			if a.now().Sub(at) < 24*time.Hour {
+				d.Networks++
+			}
 		}
 	}
 	for k, e := range a.clients {

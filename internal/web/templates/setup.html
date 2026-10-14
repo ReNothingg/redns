@@ -52,6 +52,7 @@
 
       <section class="block">
         <div class="label"><span>01</span><span>Подключение</span></div>
+        {{if not .Only}}
         <div class="tabs" role="tablist">
           <button role="tab" data-t="ios" aria-selected="true">
             iPhone и iPad
@@ -68,8 +69,8 @@
             Роутер
           </button>
         </div>
-
-        <div class="panel active" id="p-ios">
+        {{end}} {{if .Tab "ios"}}
+        <div class="panel{{if .Active `ios`}} active{{end}}" id="p-ios">
           <ol class="steps">
             <li>
               <div>
@@ -121,8 +122,8 @@
             </li>
           </ol>
         </div>
-
-        <div class="panel" id="p-mac">
+        {{end}} {{if .Tab "mac"}}
+        <div class="panel{{if .Active `mac`}} active{{end}}" id="p-mac">
           <ol class="steps">
             <li>
               <div>
@@ -156,8 +157,8 @@
             </li>
           </ol>
         </div>
-
-        <div class="panel" id="p-android">
+        {{end}} {{if .Tab "android"}}
+        <div class="panel{{if .Active `android`}} active{{end}}" id="p-android">
           {{if .AndroidDoT}}
           <ol class="steps">
             <li>
@@ -204,8 +205,8 @@
           </div>
           {{end}}
         </div>
-
-        <div class="panel" id="p-win">
+        {{end}} {{if .Tab "win"}}
+        <div class="panel{{if .Active `win`}} active{{end}}" id="p-win">
           <ol class="steps">
             <li>
               <div>
@@ -278,8 +279,8 @@
             браузер, вкладка «Браузер».
           </p>
         </div>
-
-        <div class="panel" id="p-browser">
+        {{end}} {{if .Tab "browser"}}
+        <div class="panel{{if .Active `browser`}} active{{end}}" id="p-browser">
           <ol class="steps">
             <li>
               <div>
@@ -317,8 +318,8 @@
             Codex или игры, пойдут мимо: для них настраивай систему.
           </p>
         </div>
-
-        <div class="panel" id="p-router">
+        {{end}} {{if .Tab "router"}}
+        <div class="panel{{if .Active `router`}} active{{end}}" id="p-router">
           <ol class="steps">
             <li>
               <div>
@@ -373,8 +374,10 @@
             общий, в админке они будут одним устройством.
           </p>
         </div>
+        {{end}}
       </section>
 
+      {{if .Addresses}}
       <section class="block">
         <div class="label"><span>02</span><span>Адреса</span></div>
         <div class="rows">
@@ -400,9 +403,13 @@
         </p>
         {{end}}
       </section>
+      {{end}}
 
       <section class="block">
-        <div class="label"><span>03</span><span>Канал до сервера</span></div>
+        <div class="label">
+          <span>{{if .Addresses}}03{{else}}02{{end}}</span
+          ><span>Канал до сервера</span>
+        </div>
         <div class="speed">
           <div class="big" id="tbig">—<small>Мбит/с</small></div>
           <button class="btn lg" id="tbtn">Проверить</button>
@@ -413,7 +420,10 @@
       </section>
 
       <section class="block">
-        <div class="label"><span>04</span><span>Что открывается</span></div>
+        <div class="label">
+          <span>{{if .Addresses}}04{{else}}03{{end}}</span
+          ><span>Что открывается</span>
+        </div>
         <dl>
           <div class="svc">
             <dt>ИИ</dt>
