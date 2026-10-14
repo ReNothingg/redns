@@ -27,12 +27,6 @@ body {
 .topbar .logo i {
   width: 28px;
   height: 28px;
-  border-radius: 7px;
-}
-
-.topbar .logo i svg {
-  width: 16px;
-  height: 16px;
 }
 
 .host {

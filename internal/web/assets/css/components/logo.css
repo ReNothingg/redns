@@ -11,15 +11,12 @@
 .logo i {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
-  background: var(--accent);
   display: grid;
   place-items: center;
   flex: none;
 }
 
 .logo i svg {
-  width: 18px;
-  height: 18px;
-  color: var(--on-accent);
+  width: 100%;
+  height: 100%;
 }
