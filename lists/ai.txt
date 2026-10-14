@@ -4,6 +4,7 @@ cloudflare-ech.com
 # OpenAI
 openai.com
 chatgpt.com
+chatgpt.site
 chat.com
 ai.com
 sora.com
