@@ -40,6 +40,9 @@ tls:
   acme: true
   email: "REDNS_EMAIL"
   cache_dir: /var/lib/redns/certs
+  # Токен Cloudflare с правом Zone.DNS: Edit. Нужен, чтобы в приватном режиме работал «Частный DNS» на Android.
+  # Задаётся командой sudo redns cloudflare.
+  # cloudflare_token: ""
   # acme_directory: https://acme-staging-v02.api.letsencrypt.org/directory
   # cert_file: /etc/redns/fullchain.pem
   # key_file: /etc/redns/privkey.pem

@@ -44,6 +44,7 @@ type Options struct {
 	AdminPublic  func() bool
 	Audit        *audit.Log
 	SessionsPath string
+	KeyedDoT     func() bool
 }
 
 type Web struct {
@@ -131,6 +132,7 @@ type pageData struct {
 	DoHURL           string
 	DoTHost          string
 	DoT              bool
+	AndroidDoT       string
 	ProfileBase      string
 	Rules            int
 	Version          string
@@ -146,7 +148,13 @@ func (w *Web) data(tok string) pageData {
 		DoHURL: "https://" + w.o.Host + "/dns-query", DoTHost: w.o.Host, DoT: !w.o.Access.Private(),
 		ProfileBase: "/setup",
 	}
+	if d.DoT {
+		d.AndroidDoT = d.DoTHost
+	}
 	if tok != "" {
+		if d.Private && w.o.KeyedDoT != nil && w.o.KeyedDoT() {
+			d.AndroidDoT = tok + "." + w.o.Host
+		}
 		d.TokenName = w.o.Access.TokenName(tok)
 		d.Admin = w.admin.enabled() && w.o.Access.TokenOwner(tok) == access.Owner
 		d.DoHURL += "/" + tok

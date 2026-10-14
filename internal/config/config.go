@@ -69,6 +69,7 @@ type TLS struct {
 	SelfSigned bool   `yaml:"self_signed"`
 
 	ACMEDirectory string `yaml:"acme_directory"`
+	Cloudflare    string `yaml:"cloudflare_token"`
 }
 
 type Upstream struct {

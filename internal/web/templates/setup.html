@@ -19,7 +19,11 @@
       content="#1a1a1a"
     />
     <title>ReDNS · {{.Host}}</title>
-    <link rel="icon" type="image/svg+xml" href="/assets/icons/logo.svg?v={{.Assets}}" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="/assets/icons/logo.svg?v={{.Assets}}"
+    />
     <link rel="stylesheet" href="/assets/css/setup.css?v={{.Assets}}" />
   </head>
   <body>
@@ -107,6 +111,14 @@
                 профиля.
               </div>
             </li>
+            <li>
+              <div>
+                Apple Watch профиль не поддерживают. Рядом с iPhone часы ходят в
+                сеть через него и получают ReDNS сами. По Wi‑Fi без телефона
+                часы берут DNS роутера, поэтому настрой его во вкладке «Роутер».
+                По LTE DNS часов поменять нельзя.
+              </div>
+            </li>
           </ol>
         </div>
 
@@ -146,24 +158,33 @@
         </div>
 
         <div class="panel" id="p-android">
-          {{if .DoT}}
+          {{if .AndroidDoT}}
           <ol class="steps">
             <li>
               <div>
+                Открой «Частный DNS». Xiaomi:
                 <span class="path"
-                  >Настройки → Сеть и интернет → Частный DNS</span
-                >. Иногда раздел лежит в «Подключения → Другие настройки».
+                  >Настройки → Подключение и общий доступ → Частный DNS</span
+                >. Samsung:
+                <span class="path"
+                  >Подключения → Другие настройки → Частный DNS</span
+                >. Pixel и остальные:
+                <span class="path">Сеть и интернет → Частный DNS</span>.
               </div>
             </li>
             <li><div>Выбери «Имя хоста провайдера» и вставь:</div></li>
           </ol>
           <div class="inline-copy">
-            <button class="copy" data-copy="{{.DoTHost}}">
-              <span class="v">{{.DoTHost}}</span
+            <button class="copy" data-copy="{{.AndroidDoT}}">
+              <span class="v">{{.AndroidDoT}}</span
               ><span class="c">Копировать</span>
             </button>
           </div>
-          {{else}}
+          {{if .Private}}
+          <p class="note">
+            Начало имени — это ключ устройства. Не показывай его чужим.
+          </p>
+          {{end}} {{else}}
           <ol class="steps">
             <li>
               <div>

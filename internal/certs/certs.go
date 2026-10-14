@@ -30,6 +30,7 @@ type Manager struct {
 	access *access.Access
 	acme   *autocert.Manager
 	guard  *issueGuard
+	wild   *wildcard
 
 	certFile, keyFile string
 	mu                sync.Mutex
@@ -66,6 +67,9 @@ func New(cfg *config.Config, acc *access.Access) (*Manager, error) {
 			m.acme.Client = &acme.Client{DirectoryURL: cfg.TLS.ACMEDirectory}
 		}
 		m.guard = newIssueGuard(cfg.PublicIPv4, cfg.PublicIPv6)
+		if cfg.TLS.Cloudflare != "" {
+			m.wild = newWildcard(cfg)
+		}
 	default:
 		return nil, errors.New("no TLS certificate source configured")
 	}
@@ -95,6 +99,11 @@ func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, 
 		return m.static, nil
 	}
 	name := strings.ToLower(strings.TrimSuffix(hello.ServerName, "."))
+	if m.wild != nil {
+		if c := m.wild.get(name); c != nil {
+			return c, nil
+		}
+	}
 	if m.hostPolicy(context.Background(), name) != nil {
 
 		h := *hello
@@ -137,9 +146,14 @@ func (m *Manager) HTTPHandler(fallback http.Handler) http.Handler {
 	return m.acme.HTTPHandler(fallback)
 }
 
+func (m *Manager) KeyedDoT() bool { return m.wild != nil && m.wild.ready() }
+
 func (m *Manager) Warm(ctx context.Context) {
 	if m.acme == nil {
 		return
+	}
+	if m.wild != nil {
+		go m.wild.run(ctx)
 	}
 	var lastErr string
 	var lastLog time.Time

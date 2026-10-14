@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/renothingg/redns/internal/access"
 	"github.com/renothingg/redns/internal/app"
+	"github.com/renothingg/redns/internal/certs"
 	"github.com/renothingg/redns/internal/config"
 	"github.com/renothingg/redns/internal/lists"
 	"github.com/renothingg/redns/internal/state"
@@ -43,6 +45,7 @@ Usage:
   redns check    [-c config]          validate config and load all lists
   redns token                         print a new random access token
   redns key      [-c config] [-q]     print a working setup link, issue a new key if yours was revoked
+  redns cloudflare [-c config]        save a Cloudflare API token for the wildcard certificate (Android Private DNS)
   redns passwd   [-c config] [-q]     set a new random admin panel password
   redns profile  [-c config] -token T [-only doh|dot]   print an Apple .mobileconfig
   redns stats    [-admin addr]        counters, top proxied names
@@ -73,6 +76,8 @@ func main() {
 		err = cmdPasswd(args)
 	case "key":
 		err = cmdKey(args)
+	case "cloudflare":
+		err = cmdCloudflare(args)
 	case "profile":
 		err = cmdProfile(args)
 	case "stats", "log", "clients", "lists", "why", "reload":
@@ -217,6 +222,58 @@ func newPassword() string {
 
 var hashLine = regexp.MustCompile(`(?m)^([ \t]*password_hash:).*$`)
 var adminLine = regexp.MustCompile(`(?m)^admin:[ \t]*$`)
+var cloudflareLine = regexp.MustCompile(`(?m)^([ \t]*#?[ \t]*cloudflare_token:).*$`)
+var tlsLine = regexp.MustCompile(`(?m)^tls:[ \t]*$`)
+
+func cmdCloudflare(args []string) error {
+	fs := flag.NewFlagSet("cloudflare", flag.ExitOnError)
+	path := configFlag(fs)
+	_ = fs.Parse(args)
+	cfg, err := config.Load(*path)
+	if err != nil {
+		return err
+	}
+	fmt.Print("Вставь токен Cloudflare и нажми Enter: ")
+	line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	token := strings.TrimSpace(line)
+	if token == "" || strings.ContainsAny(token, "\"\\ ") {
+		return fmt.Errorf("токен пустой или с лишними символами")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	zone, err := certs.CheckCloudflare(ctx, token, cfg.Hostname)
+	if err != nil {
+		return err
+	}
+	raw, err := os.ReadFile(*path)
+	if err != nil {
+		return err
+	}
+	st, err := os.Stat(*path)
+	if err != nil {
+		return err
+	}
+	value := []byte(`  cloudflare_token: "` + token + `"`)
+	switch {
+	case cloudflareLine.Match(raw):
+		raw = cloudflareLine.ReplaceAll(raw, value)
+	case tlsLine.Match(raw):
+		loc := tlsLine.FindIndex(raw)
+		raw = append(raw[:loc[1]:loc[1]], append(append([]byte("\n"), value...), raw[loc[1]:]...)...)
+	default:
+		return fmt.Errorf("в %s нет раздела tls", *path)
+	}
+	if err := replaceFile(*path, raw, st); err != nil {
+		return err
+	}
+	fmt.Printf("Токен подходит, зона %s.\n", zone)
+	if err := exec.Command("systemctl", "restart", "redns").Run(); err != nil {
+		fmt.Println("Перезапусти сервис: sudo systemctl restart redns")
+		return nil
+	}
+	fmt.Printf("Сервис перезапущен. Сертификат *.%s будет через 1–2 минуты, ход видно в journalctl -u redns -f\n", cfg.Hostname)
+	return nil
+}
 
 func cmdPasswd(args []string) error {
 	fs := flag.NewFlagSet("passwd", flag.ExitOnError)

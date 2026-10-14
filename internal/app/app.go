@@ -169,6 +169,7 @@ func (a *App) Start(ctx context.Context) error {
 		PasswordHash: func() string { return *a.pwHash.Load() },
 		AdminPublic:  func() bool { return a.adminPub.Load() },
 		Audit:        a.audit,
+		KeyedDoT:     a.certs.KeyedDoT,
 		SessionsPath: filepath.Join(filepath.Dir(cfg.Resolve(cfg.State)), "admin-sessions.json"),
 	})
 
