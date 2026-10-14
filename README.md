@@ -5,7 +5,7 @@
 # ReDNS
 
 **ChatGPT, Claude, Gemini, Brawl Stars и Spotify из России без VPN.**<br>
-Свой умный DNS, как Comss DNS или dns.malw.link, только на твоём сервере и только для твоих людей.
+Свой умный DNS, как Comss DNS, только на твоём сервере и только для твоих людей.
 
 [![CI](https://github.com/renothingg/redns/actions/workflows/ci.yml/badge.svg)](https://github.com/renothingg/redns/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/github/go-mod/go-version/renothingg/redns?logo=go&logoColor=white&color=00ADD8)](go.mod)
@@ -250,36 +250,3 @@ sudo systemctl reload redns
 
 Только VPS: 3–5 € в месяц. Домен необязателен. Трафика нужно немного, потому что через сервер идут только нужные сервисы, а не всё подряд.
 </details>
-
-## Разработка
-
-```bash
-make test    # go vet и сборка пакетов с -race
-make dist    # бинарники для linux/amd64 и linux/arm64
-```
-
-```
-cmd/redns         CLI и точка входа
-internal/dnsx     DNS: UDP/TCP, DoH, DoT, DoQ, кэш, апстримы
-internal/proxy    SNI- и HTTP-прокси, TCP-форварды для игр
-internal/access   ключи, авторизация IP, баны, защита от подбора
-internal/web      страница настройки, админка, профили для Apple
-  assets/css      стили по модулям: base, components, admin, setup; сервер склеивает их по @import
-  assets/icons    SVG-иконки, при запуске собираются в спрайт
-  assets/js       скрипты страниц
-  templates       HTML-шаблоны и текст соглашения
-internal/audit    журнал действий
-internal/certs    Let's Encrypt
-lists/            списки доменов
-deploy/           деплой с компьютера, установщик, systemd
-```
-
-Скриншоты в README сделаны на демонстрационных данных: все адреса из документационных диапазонов (`203.0.113.0/24`, `198.51.100.0/24`, `192.0.2.0/24`), домен `dns.example.com`.
-
-## Спасибо
-
-Часть доменов взята из [dns.malw.link](https://github.com/ImMALWARE/dns.malw.link) и [itdoginfo/allow-domains](https://github.com/itdoginfo/allow-domains). Реклама режется по [AdGuard DNS filter](https://github.com/AdguardTeam/AdGuardSDNSFilter).
-
-## Лицензия
-
-[MIT](LICENSE)
