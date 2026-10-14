@@ -20,6 +20,13 @@ type tokenInfo struct {
 	created time.Time
 }
 
+func (t tokenInfo) label() string {
+	if t.owner == "" || t.owner == Owner {
+		return t.name
+	}
+	return t.owner + " · " + t.name
+}
+
 type rules struct {
 	private bool
 	strict  bool
@@ -36,6 +43,14 @@ type entry struct {
 	proto     string
 	queries   uint64
 }
+
+type usage struct {
+	last    time.Time
+	queries uint64
+	ips     map[netip.Prefix]time.Time
+}
+
+const maxDeviceIPs = 32
 
 type strikes struct {
 	n     int
@@ -57,6 +72,7 @@ type Access struct {
 
 	mu      sync.Mutex
 	clients map[netip.Prefix]*entry
+	used    map[string]*usage
 	bad     map[netip.Prefix]*strikes
 	now     func() time.Time
 	onBlock func(netip.Prefix)
@@ -68,6 +84,7 @@ func New(host string, cfg config.Access, st state.Data) *Access {
 	a := &Access{
 		host:    strings.ToLower(host),
 		clients: map[netip.Prefix]*entry{},
+		used:    map[string]*usage{},
 		bad:     map[netip.Prefix]*strikes{},
 		now:     time.Now,
 	}
@@ -331,8 +348,53 @@ type Client struct {
 	Queries   uint64    `json:"queries"`
 }
 
+func (a *Access) Seen(ip netip.Addr, tok string) {
+	if _, ok := a.rules.Load().tokens[tok]; !ok {
+		return
+	}
+	k := Key(ip)
+	now := a.now()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	u := a.used[tok]
+	if u == nil {
+		u = &usage{ips: map[netip.Prefix]time.Time{}}
+		a.used[tok] = u
+	}
+	u.last = now
+	u.queries++
+	if _, ok := u.ips[k]; ok || len(u.ips) < maxDeviceIPs {
+		u.ips[k] = now
+	}
+}
+
 func (a *Access) client(k netip.Prefix, e *entry) Client {
-	return Client{Prefix: k.String(), Device: a.TokenName(e.token), AuthUntil: e.authUntil, LastSeen: e.lastSeen, Proto: e.proto, Queries: e.queries}
+	r := a.rules.Load()
+	type named struct {
+		name string
+		at   time.Time
+	}
+	var names []named
+	for tok, u := range a.used {
+		if at, ok := u.ips[k]; ok {
+			if info, ok := r.tokens[tok]; ok {
+				names = append(names, named{info.label(), at})
+			}
+		}
+	}
+	device := ""
+	if info, ok := r.tokens[e.token]; ok {
+		device = info.label()
+	}
+	if len(names) > 0 {
+		sort.Slice(names, func(i, j int) bool { return names[i].at.After(names[j].at) })
+		parts := make([]string, len(names))
+		for i, n := range names {
+			parts[i] = n.name
+		}
+		device = strings.Join(parts, ", ")
+	}
+	return Client{Prefix: k.String(), Device: device, AuthUntil: e.authUntil, LastSeen: e.lastSeen, Proto: e.proto, Queries: e.queries}
 }
 
 func (a *Access) Lookup(ip netip.Addr) (Client, bool) {
@@ -358,38 +420,48 @@ func (a *Access) Clients() []Client {
 }
 
 type Device struct {
-	Name     string    `json:"name"`
-	Owner    string    `json:"owner"`
-	Kind     string    `json:"kind,omitempty"`
-	Token    string    `json:"token"`
-	Source   string    `json:"source"`
-	Created  time.Time `json:"created,omitempty"`
-	LastSeen time.Time `json:"last_seen,omitempty"`
-	IPs      []string  `json:"ips"`
-	Queries  uint64    `json:"queries"`
+	Name     string               `json:"name"`
+	Owner    string               `json:"owner"`
+	Kind     string               `json:"kind,omitempty"`
+	Token    string               `json:"token"`
+	Source   string               `json:"source"`
+	Created  time.Time            `json:"created,omitempty"`
+	LastSeen time.Time            `json:"last_seen,omitempty"`
+	IPs      []string             `json:"ips"`
+	Queries  uint64               `json:"queries"`
+	IPSeen   map[string]time.Time `json:"-"`
 }
 
 func (a *Access) Devices() []Device {
 	r := a.rules.Load()
 	byToken := map[string]*Device{}
 	for tok, info := range r.tokens {
-		byToken[tok] = &Device{Name: info.name, Owner: info.owner, Kind: info.kind, Token: tok, Source: info.source, Created: info.created, IPs: []string{}}
+		byToken[tok] = &Device{Name: info.name, Owner: info.owner, Kind: info.kind, Token: tok, Source: info.source, Created: info.created, IPs: []string{}, IPSeen: map[string]time.Time{}}
 	}
 	a.mu.Lock()
-	for k, e := range a.clients {
-		d := byToken[e.token]
+	for tok, u := range a.used {
+		d := byToken[tok]
 		if d == nil {
 			continue
 		}
-		d.IPs = append(d.IPs, k.String())
-		d.Queries += e.queries
-		if e.lastSeen.After(d.LastSeen) {
-			d.LastSeen = e.lastSeen
+		d.LastSeen, d.Queries = u.last, u.queries
+		for k, at := range u.ips {
+			d.IPSeen[k.String()] = at
+		}
+	}
+	for k, e := range a.clients {
+		if d := byToken[e.token]; d != nil {
+			if _, ok := d.IPSeen[k.String()]; !ok {
+				d.IPSeen[k.String()] = e.authUntil.Add(-a.rules.Load().ttl)
+			}
 		}
 	}
 	a.mu.Unlock()
 	out := make([]Device, 0, len(byToken))
 	for _, d := range byToken {
+		for ip := range d.IPSeen {
+			d.IPs = append(d.IPs, ip)
+		}
 		sort.Strings(d.IPs)
 		out = append(out, *d)
 	}
@@ -413,6 +485,18 @@ func (a *Access) GC() {
 	for k, s := range a.bad {
 		if now.After(s.until) && now.Sub(s.first) > strikeWindow {
 			delete(a.bad, k)
+		}
+	}
+	tokens := a.rules.Load().tokens
+	for tok, u := range a.used {
+		if _, ok := tokens[tok]; !ok {
+			delete(a.used, tok)
+			continue
+		}
+		for k, at := range u.ips {
+			if now.Sub(at) > 24*time.Hour {
+				delete(u.ips, k)
+			}
 		}
 	}
 	a.mu.Unlock()

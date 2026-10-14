@@ -451,13 +451,22 @@ func (a *admin) devices(rw http.ResponseWriter, r *http.Request) {
 	}
 	now := a.now()
 	ds := a.w.o.Access.Devices()
+	holder := map[string]string{}
+	latest := map[string]time.Time{}
+	for _, d := range ds {
+		for ip, at := range d.IPSeen {
+			if at.After(latest[ip]) {
+				latest[ip], holder[ip] = at, d.Token
+			}
+		}
+	}
 	out := make([]deviceRow, 0, len(ds))
 	for _, d := range ds {
 		row := deviceRow{Device: d, SetupURL: a.setupURL(d.Token), Hosts: []string{}, LastUsed: d.LastSeen}
 		seen := map[string]bool{}
 		for _, ip := range d.IPs {
 			s, ok := stats[ip]
-			if !ok {
+			if !ok || holder[ip] != d.Token {
 				continue
 			}
 			row.Active += s.Active

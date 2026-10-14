@@ -71,6 +71,7 @@ func (r *Resolver) Resolve(ctx context.Context, req *dns.Msg, c Client) *dns.Msg
 	r.stats.Proto(c.Proto)
 	if c.Token != "" {
 		r.access.Authorize(c.IP, c.Token)
+		r.access.Seen(c.IP, c.Token)
 	}
 	if !r.access.Allowed(c.IP) {
 		r.stats.Refused.Add(1)
