@@ -37,7 +37,7 @@ func (d *DoH) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if r.TLS != nil {
-		tok, _ = d.Access.TokenFromServerName(r.TLS.ServerName)
+		tok = d.Access.TokenFromSNI(ip, r.TLS.ServerName)
 	}
 
 	var raw []byte

@@ -141,21 +141,28 @@ func (a *Access) ValidToken(tok string) (string, bool) {
 		return "", false
 	}
 	tok = strings.ToLower(tok)
-	_, ok := a.rules.Load().tokens[tok]
-	return tok, ok
+	if _, ok := a.rules.Load().tokens[tok]; !ok {
+		return "", false
+	}
+	return tok, true
 }
 
 func (a *Access) TokenName(tok string) string {
 	return a.rules.Load().tokens[tok].name
 }
 
-func (a *Access) TokenFromServerName(sni string) (string, bool) {
+func (a *Access) TokenFromSNI(ip netip.Addr, sni string) string {
 	sni = strings.ToLower(strings.TrimSuffix(sni, "."))
 	label, rest, ok := strings.Cut(sni, ".")
-	if !ok || rest != a.host {
-		return "", false
+	if !ok || label == "" || rest != a.host || a.Throttled(ip) {
+		return ""
 	}
-	return a.ValidToken(label)
+	tok, valid := a.ValidToken(label)
+	if !valid {
+		a.Strike(ip)
+		return ""
+	}
+	return tok
 }
 
 func (a *Access) IsOwnName(sni string) bool {
@@ -182,6 +189,9 @@ func (a *Access) Authorize(ip netip.Addr, tok string) {
 		return
 	}
 	r := a.rules.Load()
+	if _, ok := r.tokens[tok]; !ok {
+		return
+	}
 	k := Key(ip)
 	now := a.now()
 	a.mu.Lock()

@@ -53,7 +53,7 @@ func (h *Handler) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	if h.Proto == "dot" {
 		if cs, ok := w.(dns.ConnectionStater); ok {
 			if st := cs.ConnectionState(); st != nil {
-				c.Token, _ = h.Access.TokenFromServerName(st.ServerName)
+				c.Token = h.Access.TokenFromSNI(ip, st.ServerName)
 			}
 		}
 	}
@@ -164,7 +164,7 @@ func (s *DoQServer) serve() {
 
 func (s *DoQServer) handleConn(conn *quic.Conn) {
 	ip := addrOf(conn.RemoteAddr())
-	tok, _ := s.access.TokenFromServerName(conn.ConnectionState().TLS.ServerName)
+	tok := s.access.TokenFromSNI(ip, conn.ConnectionState().TLS.ServerName)
 	for {
 		st, err := conn.AcceptStream(s.ctx)
 		if err != nil {
