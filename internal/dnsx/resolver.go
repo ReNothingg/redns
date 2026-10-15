@@ -70,11 +70,14 @@ func (r *Resolver) Resolve(ctx context.Context, req *dns.Msg, c Client) *dns.Msg
 	start := time.Now()
 	r.stats.Queries.Add(1)
 	r.stats.Proto(c.Proto)
+	admitted := false
 	if c.Token != "" {
-		r.access.Authorize(c.IP, c.Token)
-		r.access.Seen(c.IP, c.Token, c.FP)
+		if admitted = r.access.Admit(c.IP, c.Token, c.FP); !admitted {
+			r.stats.Refused.Add(1)
+			return rcode(req, dns.RcodeRefused)
+		}
 	}
-	if !r.access.Allowed(c.IP) {
+	if !admitted && !r.access.Allowed(c.IP) {
 		r.stats.Refused.Add(1)
 		if c.plain() {
 			return nil

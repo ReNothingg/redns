@@ -204,6 +204,7 @@ func (a *admin) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		"devices/revoke":       {http.MethodPost, a.revokeDevice},
 		"devices/revoke-owner": {http.MethodPost, a.revokeOwner},
 		"devices/reset":        {http.MethodPost, a.resetDevice},
+		"devices/lock":         {http.MethodPost, a.lockDevice},
 		"qr":                   {http.MethodGet, a.qr},
 		"bans/add":             {http.MethodPost, a.ban},
 		"bans/remove":          {http.MethodPost, a.unban},
@@ -608,6 +609,9 @@ func (a *admin) revokeOwner(rw http.ResponseWriter, r *http.Request) {
 			kept = append(kept, t)
 		}
 		d.Tokens = kept
+		for _, t := range tokens {
+			delete(d.Locks, t)
+		}
 		for t := range drop {
 			d.Revoked = append(d.Revoked, t)
 		}
@@ -617,6 +621,52 @@ func (a *admin) revokeOwner(rw http.ResponseWriter, r *http.Request) {
 	}
 	a.record(r, false, "Отключены все устройства", body.Owner)
 	writeJSON(rw, map[string]any{"ok": true, "revoked": len(tokens)})
+}
+
+func (a *admin) lockDevice(rw http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token string `json:"token"`
+		Mode  string `json:"mode"`
+	}
+	if err := decode(r, &body); err != nil || body.Token == "" {
+		http.Error(rw, "bad request", http.StatusBadRequest)
+		return
+	}
+	label := ""
+	for _, d := range a.w.o.Access.Devices() {
+		if d.Token == body.Token {
+			label = d.Owner + " · " + d.Name
+		}
+	}
+	if label == "" {
+		http.Error(rw, "нет такого устройства", http.StatusNotFound)
+		return
+	}
+	sole := a.w.o.Access.SoleClient(body.Token)
+	action := ""
+	if !a.update(rw, func(d *state.Data) error {
+		if d.Locks == nil {
+			d.Locks = map[string]string{}
+		}
+		switch body.Mode {
+		case "on":
+			d.Locks[body.Token] = sole
+			action = "Жёсткий режим включён"
+		case "rebind":
+			d.Locks[body.Token] = ""
+			action = "Привязка сброшена, ключ ждёт нового клиента"
+		case "off":
+			delete(d.Locks, body.Token)
+			action = "Жёсткий режим выключен"
+		default:
+			return errors.New("mode: on, off или rebind")
+		}
+		return nil
+	}) {
+		return
+	}
+	a.record(r, false, action, label)
+	writeJSON(rw, map[string]any{"ok": true, "bound": body.Mode == "on" && sole != ""})
 }
 
 func (a *admin) resetDevice(rw http.ResponseWriter, r *http.Request) {
@@ -675,6 +725,7 @@ func (a *admin) revokeDevice(rw http.ResponseWriter, r *http.Request) {
 			kept = append(kept, t)
 		}
 		d.Tokens = kept
+		delete(d.Locks, body.Token)
 		if !found {
 			d.Revoked = append(d.Revoked, body.Token)
 		}

@@ -25,10 +25,11 @@ type Ban struct {
 }
 
 type Data struct {
-	Tokens      []Token  `json:"tokens"`
-	Revoked     []string `json:"revoked"`
-	Bans        []Ban    `json:"bans"`
-	StrictProxy *bool    `json:"strict_proxy,omitempty"`
+	Tokens      []Token           `json:"tokens"`
+	Revoked     []string          `json:"revoked"`
+	Bans        []Ban             `json:"bans"`
+	StrictProxy *bool             `json:"strict_proxy,omitempty"`
+	Locks       map[string]string `json:"locks,omitempty"`
 }
 
 type Store struct {
@@ -114,6 +115,12 @@ func clone(d Data) Data {
 	if d.StrictProxy != nil {
 		v := *d.StrictProxy
 		out.StrictProxy = &v
+	}
+	if d.Locks != nil {
+		out.Locks = make(map[string]string, len(d.Locks))
+		for k, v := range d.Locks {
+			out.Locks[k] = v
+		}
 	}
 	return out
 }

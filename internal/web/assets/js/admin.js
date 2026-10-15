@@ -687,6 +687,9 @@
           el("div", "title"),
           el("span", null, d.name),
           d.online ? el("span", "badge own", "онлайн") : null,
+          d.locked
+            ? el("span", "badge", d.bound ? "привязан" : "ждёт первого клиента")
+            : null,
           shared
             ? el(
                 "span",
@@ -737,7 +740,7 @@
                 "span",
                 null,
                 d.clients > 1
-                  ? "Ключом пользуются разные системы или программы. Если это не обновление и не твой второй браузер, ключ поставили куда-то ещё."
+                  ? "Ключом пользуются разные системы или программы. Если это не обновление и не твой второй браузер, ключ поставили куда-то ещё. Кнопка «Привязать» оставит его только на одном клиенте."
                   : "Ключ приходил из многих сетей за сутки. Возможно, им поделились.",
               ),
               reset,
@@ -756,6 +759,53 @@
           logQuery = d.ips[0].split("/")[0];
           $("log-filter").value = logQuery;
           location.hash = "#log";
+        });
+        if (d.locked && d.bound) {
+          var rebind = el("button", "btn sm ghost", "Перепривязать");
+          rebind.addEventListener("click", function () {
+            if (
+              !confirm(
+                "Ключ отвяжется и привяжется к следующему клиенту, который подключится. Нужно, если устройство обновилось и перестало работать.",
+              )
+            )
+              return;
+            api("POST", "devices/lock", { token: d.token, mode: "rebind" })
+              .then(refreshPeople)
+              .catch(fail);
+          });
+          body.appendChild(
+            add(
+              el("div", "meta"),
+              el(
+                "span",
+                null,
+                "Ключ работает только на одном клиенте, остальным сервер отказывает.",
+              ),
+              rebind,
+            ),
+          );
+        }
+        var lock = el(
+          "button",
+          "btn sm ghost",
+          d.locked ? "Отвязать" : "Привязать",
+        );
+        lock.addEventListener("click", function () {
+          if (
+            !d.locked &&
+            !confirm(
+              "Жёсткий режим: ключ «" +
+                d.name +
+                "» будет работать только на одном клиенте — на том, что уже подключён, или на первом, который подключится. Другие устройства и программы с этим ключом получат отказ. Включить?",
+            )
+          )
+            return;
+          api("POST", "devices/lock", {
+            token: d.token,
+            mode: d.locked ? "off" : "on",
+          })
+            .then(refreshPeople)
+            .catch(fail);
         });
         var rm = el("button", "btn sm danger", "Отключить");
         rm.addEventListener("click", function () {
@@ -778,7 +828,7 @@
             el("div", "row"),
             kindIcon(d.kind),
             body,
-            add(el("div", "ops"), qrb, logb, rm),
+            add(el("div", "ops"), qrb, logb, lock, rm),
           ),
         );
       });

@@ -83,6 +83,17 @@ func New(ctx context.Context, cfg *config.Config, version string) (*App, error) 
 	a.access.OnNewClient(func(label string, clients int) {
 		a.audit.Warn("Ключ используется ещё одним устройством или программой", "", fmt.Sprintf("%s · клиентов: %d", label, clients))
 	})
+	a.access.OnLock(func(tok, fp, label string) {
+		_, _ = a.store.Update(func(d *state.Data) error {
+			if _, ok := d.Locks[tok]; ok {
+				d.Locks[tok] = fp
+			}
+			return nil
+		})
+		a.audit.Info("Ключ привязан к клиенту", "", label)
+	}, func(label string, ip netip.Addr) {
+		a.audit.Warn("Отклонён чужой клиент с привязанным ключом", ip.String(), label)
+	})
 	a.fp = dnsx.NewFingerprints()
 	a.fetcher = lists.NewFetcher(cfg.Resolve(cfg.Lists.CacheDir))
 

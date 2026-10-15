@@ -39,6 +39,7 @@ type rules struct {
 type entry struct {
 	authUntil time.Time
 	token     string
+	locked    bool
 	lastSeen  time.Time
 	proto     string
 	queries   uint64
@@ -77,21 +78,78 @@ type Access struct {
 	mu      sync.Mutex
 	clients map[netip.Prefix]*entry
 	used    map[string]*usage
+	locks   map[string]string
+	refused map[string]time.Time
 	bad     map[netip.Prefix]*strikes
 	now     func() time.Time
 	onBlock func(netip.Prefix)
 	onNew   func(label string, clients int)
+	onBind  func(tok, fp, label string)
+	onDeny  func(label string, ip netip.Addr)
 }
 
 func (a *Access) OnBlock(fn func(netip.Prefix)) { a.onBlock = fn }
 
 func (a *Access) OnNewClient(fn func(label string, clients int)) { a.onNew = fn }
 
+func (a *Access) OnLock(bind func(tok, fp, label string), deny func(label string, ip netip.Addr)) {
+	a.onBind, a.onDeny = bind, deny
+}
+
+func (a *Access) Admit(ip netip.Addr, tok, fp string) bool {
+	info, ok := a.rules.Load().tokens[tok]
+	if !ok || a.Banned(ip) {
+		return false
+	}
+	a.mu.Lock()
+	bound, locked := a.locks[tok]
+	bind := false
+	if locked {
+		switch {
+		case bound == "" && fp != "":
+			a.locks[tok], bind = fp, true
+		case fp == "" || bound != fp:
+			key := tok + "|" + fp
+			report := a.now().Sub(a.refused[key]) > time.Hour
+			if report {
+				a.refused[key] = a.now()
+			}
+			a.mu.Unlock()
+			if report && a.onDeny != nil {
+				a.onDeny(info.label(), ip)
+			}
+			return false
+		}
+	}
+	a.mu.Unlock()
+	if bind && a.onBind != nil {
+		a.onBind(tok, fp, info.label())
+	}
+	a.Authorize(ip, tok)
+	a.Seen(ip, tok, fp)
+	return true
+}
+
+func (a *Access) SoleClient(tok string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	u := a.used[tok]
+	if u == nil || len(u.clients) != 1 {
+		return ""
+	}
+	for fp := range u.clients {
+		return fp
+	}
+	return ""
+}
+
 func New(host string, cfg config.Access, st state.Data) *Access {
 	a := &Access{
 		host:    strings.ToLower(host),
 		clients: map[netip.Prefix]*entry{},
 		used:    map[string]*usage{},
+		locks:   map[string]string{},
+		refused: map[string]time.Time{},
 		bad:     map[netip.Prefix]*strikes{},
 		now:     time.Now,
 	}
@@ -139,6 +197,12 @@ func (a *Access) Update(cfg config.Access, st state.Data) {
 	}
 	a.rules.Store(r)
 	a.mu.Lock()
+	a.locks = map[string]string{}
+	for tok, fp := range st.Locks {
+		if _, ok := r.tokens[tok]; ok {
+			a.locks[tok] = fp
+		}
+	}
 	for _, e := range a.clients {
 		if _, ok := r.tokens[e.token]; e.token != "" && !ok {
 			e.authUntil = time.Time{}
@@ -226,6 +290,7 @@ func (a *Access) Authorize(ip netip.Addr, tok string) {
 	}
 	e.authUntil = now.Add(r.ttl)
 	e.token = tok
+	_, e.locked = a.locks[tok]
 	a.mu.Unlock()
 }
 
@@ -258,9 +323,16 @@ func (a *Access) Allowed(ip netip.Addr) bool {
 	}
 	a.mu.Lock()
 	e := a.clients[Key(ip)]
-	ok := e != nil && a.now().Before(e.authUntil)
+	ok := e != nil && a.now().Before(e.authUntil) && !e.locked
 	a.mu.Unlock()
 	return ok
+}
+
+func (a *Access) authorized(ip netip.Addr) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	e := a.clients[Key(ip.Unmap())]
+	return e != nil && a.now().Before(e.authUntil)
 }
 
 func (a *Access) ProxyAllowed(ip netip.Addr) bool {
@@ -270,7 +342,7 @@ func (a *Access) ProxyAllowed(ip netip.Addr) bool {
 	if !a.rules.Load().strict {
 		return true
 	}
-	return a.Allowed(ip)
+	return a.Allowed(ip) || a.authorized(ip)
 }
 
 func (a *Access) Strike(ip netip.Addr) {
@@ -460,6 +532,8 @@ type Device struct {
 	LastSeen time.Time            `json:"last_seen,omitempty"`
 	IPs      []string             `json:"ips"`
 	Queries  uint64               `json:"queries"`
+	Locked   bool                 `json:"locked"`
+	Bound    bool                 `json:"bound"`
 	Networks int                  `json:"networks"`
 	Clients  int                  `json:"clients"`
 	IPSeen   map[string]time.Time `json:"-"`
@@ -472,6 +546,11 @@ func (a *Access) Devices() []Device {
 		byToken[tok] = &Device{Name: info.name, Owner: info.owner, Kind: info.kind, Token: tok, Source: info.source, Created: info.created, IPs: []string{}, IPSeen: map[string]time.Time{}}
 	}
 	a.mu.Lock()
+	for tok, fp := range a.locks {
+		if d := byToken[tok]; d != nil {
+			d.Locked, d.Bound = true, fp != ""
+		}
+	}
 	for tok, u := range a.used {
 		d := byToken[tok]
 		if d == nil {
