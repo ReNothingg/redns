@@ -27,13 +27,8 @@ func (d *DoH) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tok := ""
 	ip := clientIP(r)
 	if rest, ok := strings.CutPrefix(r.URL.Path, dohPath+"/"); ok {
-		if d.Access.Throttled(ip) {
-			http.NotFound(w, r)
-			return
-		}
 		var valid bool
-		if tok, valid = d.Access.ValidToken(strings.Trim(rest, "/")); !valid {
-			d.Access.Strike(ip)
+		if tok, valid = d.Access.CheckKey(ip, strings.Trim(rest, "/")); !valid {
 			http.NotFound(w, r)
 			return
 		}

@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/netip"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -142,6 +143,8 @@ type pageData struct {
 	Only             string
 }
 
+var previewBot = regexp.MustCompile(`(?i)bot\b|bot/|whatsapp|facebookexternalhit|vkshare|viber|skypeuripreview|preview`)
+
 var kindTabs = map[string]string{"iphone": "ios", "ipad": "ios", "mac": "mac", "android": "android", "windows": "win"}
 
 func (d pageData) Tab(t string) bool { return d.Only == "" || d.Only == t }
@@ -207,18 +210,14 @@ func (w *Web) setup(rw http.ResponseWriter, r *http.Request) {
 		tok, file = parts[0], parts[1]
 	}
 	if tok != "" {
-		ip := remoteIP(r)
-		if w.o.Access.Throttled(ip) {
-			http.NotFound(rw, r)
-			return
-		}
 		var ok bool
-		if tok, ok = w.o.Access.ValidToken(tok); !ok {
-			w.o.Access.Strike(ip)
+		if tok, ok = w.o.Access.CheckKey(remoteIP(r), tok); !ok {
 			http.NotFound(rw, r)
 			return
 		}
-		w.o.Access.Authorize(remoteIP(r), tok)
+		if !previewBot.MatchString(r.UserAgent()) {
+			w.o.Access.Authorize(remoteIP(r), tok)
+		}
 	} else if w.o.Access.Private() {
 		http.NotFound(rw, r)
 		return

@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -612,8 +613,10 @@ func (a *admin) revokeOwner(rw http.ResponseWriter, r *http.Request) {
 		for _, t := range tokens {
 			delete(d.Locks, t)
 		}
-		for t := range drop {
-			d.Revoked = append(d.Revoked, t)
+		for _, t := range tokens {
+			if !slices.Contains(d.Revoked, t) {
+				d.Revoked = append(d.Revoked, t)
+			}
 		}
 		return nil
 	}) {
@@ -716,17 +719,14 @@ func (a *admin) revokeDevice(rw http.ResponseWriter, r *http.Request) {
 	}
 	if !a.update(rw, func(d *state.Data) error {
 		kept := d.Tokens[:0]
-		found := false
 		for _, t := range d.Tokens {
-			if t.Token == body.Token {
-				found = true
-				continue
+			if t.Token != body.Token {
+				kept = append(kept, t)
 			}
-			kept = append(kept, t)
 		}
 		d.Tokens = kept
 		delete(d.Locks, body.Token)
-		if !found {
+		if !slices.Contains(d.Revoked, body.Token) {
 			d.Revoked = append(d.Revoked, body.Token)
 		}
 		return nil

@@ -31,6 +31,7 @@ type rules struct {
 	private bool
 	strict  bool
 	tokens  map[string]tokenInfo
+	revoked map[string]bool
 	cidrs   []netip.Prefix
 	bans    []netip.Prefix
 	ttl     time.Duration
@@ -169,8 +170,9 @@ func (a *Access) Update(cfg config.Access, st state.Data) {
 	}
 	revoked := map[string]bool{}
 	for _, t := range st.Revoked {
-		revoked[t] = true
+		revoked[strings.ToLower(t)] = true
 	}
+	r.revoked = revoked
 	for _, t := range cfg.Tokens {
 		if !revoked[t.Token] {
 			r.tokens[t.Token] = tokenInfo{name: t.Name, owner: Owner, source: "config"}
@@ -239,17 +241,23 @@ func (a *Access) TokenName(tok string) string {
 	return a.rules.Load().tokens[tok].name
 }
 
+func (a *Access) CheckKey(ip netip.Addr, key string) (string, bool) {
+	if tok, ok := a.ValidToken(key); ok {
+		return tok, true
+	}
+	if !a.rules.Load().revoked[strings.ToLower(key)] && !a.Throttled(ip) {
+		a.Strike(ip)
+	}
+	return "", false
+}
+
 func (a *Access) TokenFromSNI(ip netip.Addr, sni string) string {
 	sni = strings.ToLower(strings.TrimSuffix(sni, "."))
 	label, rest, ok := strings.Cut(sni, ".")
-	if !ok || label == "" || rest != a.host || a.Throttled(ip) {
+	if !ok || label == "" || rest != a.host {
 		return ""
 	}
-	tok, valid := a.ValidToken(label)
-	if !valid {
-		a.Strike(ip)
-		return ""
-	}
+	tok, _ := a.CheckKey(ip, label)
 	return tok
 }
 
