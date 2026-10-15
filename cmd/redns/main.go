@@ -256,7 +256,15 @@ func cmdCloudflare(args []string) error {
 	value := []byte(`  cloudflare_token: "` + token + `"`)
 	switch {
 	case cloudflareLine.Match(raw):
-		raw = cloudflareLine.ReplaceAll(raw, value)
+		locs := cloudflareLine.FindAllIndex(raw, -1)
+		loc := locs[0]
+		for _, l := range locs {
+			if !bytes.HasPrefix(bytes.TrimSpace(raw[l[0]:l[1]]), []byte("#")) {
+				loc = l
+				break
+			}
+		}
+		raw = append(raw[:loc[0]:loc[0]], append(value, raw[loc[1]:]...)...)
 	case tlsLine.Match(raw):
 		loc := tlsLine.FindIndex(raw)
 		raw = append(raw[:loc[1]:loc[1]], append(append([]byte("\n"), value...), raw[loc[1]:]...)...)
@@ -325,6 +333,10 @@ func replaceFile(path string, raw []byte, st os.FileInfo) error {
 	if err := os.WriteFile(tmp, raw, st.Mode().Perm()); err != nil {
 		return err
 	}
+	if _, err := config.Load(tmp); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("после правки конфиг не читается, оставил старый: %w", err)
+	}
 	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
 		_ = os.Chown(tmp, int(sys.Uid), int(sys.Gid))
 	}
@@ -374,18 +386,23 @@ func cmdKey(args []string) error {
 			return err
 		}
 		key = newToken()
-		raw = bytes.ReplaceAll(raw, []byte(cfg.Access.Tokens[0].Token), []byte(key))
+		old := []byte(cfg.Access.Tokens[0].Token)
+		if !bytes.Contains(raw, old) {
+			return fmt.Errorf("не нашёл ключ %s… в %s", cfg.Access.Tokens[0].Token[:4], *path)
+		}
+		raw = bytes.ReplaceAll(raw, old, []byte(key))
 		if err := replaceFile(*path, raw, st); err != nil {
 			return err
 		}
 		fresh = true
 		fmt.Fprintln(os.Stderr, "Твой ключ был отключён в админке, выдал новый. Профили со старым ключом надо поставить заново.")
 	}
+	reloaded := !fresh || exec.Command("systemctl", "reload", "redns").Run() == nil
 	if *quiet {
 		fmt.Println(key)
 		return nil
 	}
-	if fresh && exec.Command("systemctl", "reload", "redns").Run() != nil {
+	if !reloaded {
 		fmt.Println("Чтобы новый ключ заработал: sudo systemctl reload redns")
 	}
 	fmt.Printf("Ссылка настройки: https://%s/setup/%s\n", cfg.Hostname, key)
@@ -480,6 +497,9 @@ func cmdAdmin(cmd string, args []string) error {
 		}
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("%s", strings.TrimSpace(string(body)))
+		}
 		fmt.Println(strings.TrimSpace(string(body)))
 	case "log":
 		filter := url.QueryEscape(fs.Arg(0))

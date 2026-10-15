@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -122,9 +123,9 @@ func (m *Manager) acmeCert(hello *tls.ClientHelloInfo) (*tls.Certificate, error)
 	name := strings.ToLower(hello.ServerName)
 	if !m.guard.isReady(name) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_, cacheErr := m.acme.Cache.Get(ctx, name)
+		data, cacheErr := m.acme.Cache.Get(ctx, name)
 		cancel()
-		if cacheErr == nil {
+		if cacheErr == nil && cachedValid(data) {
 			m.guard.markReady(name)
 		} else if err := m.guard.check(name); err != nil {
 			return nil, err
@@ -231,4 +232,17 @@ func SelfSigned(host string) (*tls.Certificate, error) {
 		return nil, err
 	}
 	return &tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, nil
+}
+
+func cachedValid(data []byte) bool {
+	for {
+		var b *pem.Block
+		if b, data = pem.Decode(data); b == nil {
+			return false
+		}
+		if b.Type == "CERTIFICATE" {
+			leaf, err := x509.ParseCertificate(b.Bytes)
+			return err == nil && time.Now().Before(leaf.NotAfter)
+		}
+	}
 }

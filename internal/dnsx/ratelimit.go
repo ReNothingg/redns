@@ -39,7 +39,7 @@ func (l *Limiter) Allow(ip netip.Addr) bool {
 	b := l.m[k]
 	if b == nil {
 		if len(l.m) > 500000 {
-			return false
+			return true
 		}
 		b = &bucket{tokens: l.burst, last: now}
 		l.m[k] = b

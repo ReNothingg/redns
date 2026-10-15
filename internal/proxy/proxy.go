@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -189,6 +190,11 @@ func (p *Proxy) handleTLS(c net.Conn) {
 	}
 	_ = c.SetReadDeadline(time.Time{})
 	sni := lists.Normalize(hello.ServerName)
+	if sni != "" && !validHost(sni) {
+		p.o.Stats.ConnsDenied.Add(1)
+		c.Close()
+		return
+	}
 
 	if sni == "" || p.o.Access.IsOwnName(sni) {
 		p.local(p.o.LocalTLS, c, raw)
@@ -212,7 +218,7 @@ func (p *Proxy) handleHTTP(c net.Conn) {
 	}
 	_ = c.SetReadDeadline(time.Now().Add(p.o.HandshakeTimeout))
 	var buf bytes.Buffer
-	req, err := http.ReadRequest(bufio.NewReader(io.TeeReader(c, &buf)))
+	req, err := http.ReadRequest(bufio.NewReader(io.TeeReader(io.LimitReader(c, maxHTTPHead), &buf)))
 	if err != nil {
 		c.Close()
 		return
@@ -223,6 +229,11 @@ func (p *Proxy) handleHTTP(c net.Conn) {
 		host = h
 	}
 	host = lists.Normalize(host)
+	if host != "" && !validHost(host) {
+		p.o.Stats.ConnsDenied.Add(1)
+		c.Close()
+		return
+	}
 	if host == "" || p.o.Access.IsOwnName(host) {
 		p.local(p.o.LocalHTTP, c, buf.Bytes())
 		return
@@ -365,9 +376,29 @@ var reserved = []netip.Prefix{
 	netip.MustParsePrefix("2001:db8::/32"),
 }
 
+const maxHTTPHead = 16 << 10
+
+func validHost(h string) bool {
+	if len(h) > 253 {
+		return false
+	}
+	for label := range strings.SplitSeq(h, ".") {
+		if label == "" || len(label) > 63 {
+			return false
+		}
+		for i := 0; i < len(label); i++ {
+			c := label[i]
+			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func (p *Proxy) forbidden(a netip.Addr) bool {
 	a = a.Unmap()
-	if p.self[a] || a.IsUnspecified() || a.IsMulticast() {
+	if p.self[a] || a.IsUnspecified() || a.IsMulticast() || a.IsLoopback() || a.IsLinkLocalUnicast() {
 		return true
 	}
 	if p.o.AllowPrivate {

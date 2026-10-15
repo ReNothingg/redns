@@ -62,9 +62,10 @@ func (h *Hints) Hint(client netip.Addr, name string) {
 		if _, ok := f.rules.Match(name); !ok {
 			continue
 		}
+		key := hintKey{k, f.port}
 		h.mu.Lock()
-		if len(h.m) < 1_000_000 {
-			h.m[hintKey{k, f.port}] = hintVal{name, now.Add(f.ttl)}
+		if _, ok := h.m[key]; ok || len(h.m) < 1_000_000 {
+			h.m[key] = hintVal{name, now.Add(f.ttl)}
 		}
 		h.mu.Unlock()
 	}

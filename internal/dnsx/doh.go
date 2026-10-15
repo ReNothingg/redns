@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"io"
+	"net"
 	"net/http"
 	"net/netip"
 	"strconv"
@@ -26,7 +27,7 @@ const dohPath = "/dns-query"
 func (d *DoH) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tok := ""
 	ip := clientIP(r)
-	if rest, ok := strings.CutPrefix(r.URL.Path, dohPath+"/"); ok {
+	if rest, ok := strings.CutPrefix(r.URL.Path, dohPath+"/"); ok && strings.Trim(rest, "/") != "" {
 		var valid bool
 		if tok, valid = d.Access.CheckKey(ip, strings.Trim(rest, "/")); !valid {
 			http.NotFound(w, r)
@@ -69,7 +70,7 @@ func (d *DoH) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	resp := d.R.Resolve(ctx, req, Client{IP: ip, Proto: "doh", Token: tok, FP: d.FP.Get(r.RemoteAddr)})
+	resp := d.R.Resolve(ctx, req, Client{IP: ip, Proto: "doh", Token: tok, FP: d.FP.Get(connKey(r))})
 	if resp == nil {
 		resp = rcode(req, dns.RcodeRefused)
 	}
@@ -81,7 +82,7 @@ func (d *DoH) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Content-Type", "application/dns-message")
 	h.Set("Content-Length", strconv.Itoa(len(out)))
-	if r.Method == http.MethodGet && tok == "" {
+	if r.Method == http.MethodGet && tok == "" && (resp.Rcode == dns.RcodeSuccess || resp.Rcode == dns.RcodeNameError) {
 		h.Set("Cache-Control", "max-age="+strconv.Itoa(int(minTTL(resp))))
 	} else {
 		h.Set("Cache-Control", "no-store")
@@ -104,4 +105,12 @@ func minTTL(m *dns.Msg) uint32 {
 		}
 	}
 	return ttl
+}
+
+func connKey(r *http.Request) string {
+	local, _ := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	if local == nil {
+		return r.RemoteAddr
+	}
+	return local.String() + "|" + r.RemoteAddr
 }

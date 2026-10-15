@@ -143,9 +143,9 @@ install -d -o redns -g redns -m 0750 /var/lib/redns /var/lib/redns/certs /var/li
 
 if [[ ! -f $CONFIG ]]; then
   TOKEN="$(/usr/local/bin/redns token)"
-  sed -e "s|REDNS_HOSTNAME|$DOMAIN|" -e "s|REDNS_IPV4|$IPV4|" -e "s|REDNS_IPV6|$IPV6|" \
+  (umask 027; sed -e "s|REDNS_HOSTNAME|$DOMAIN|" -e "s|REDNS_IPV4|$IPV4|" -e "s|REDNS_IPV6|$IPV6|" \
       -e "s|REDNS_TOKEN|$TOKEN|" -e "s|REDNS_EMAIL|$EMAIL|" -e "s|^  mode: private|  mode: $MODE|" \
-      "$SRC/config.example.yaml" > $CONFIG
+      "$SRC/config.example.yaml" > $CONFIG)
   if [[ $ACME_STAGING -eq 1 ]]; then
     sed -i 's|^  # acme_directory:|  acme_directory:|' $CONFIG
   fi
@@ -164,7 +164,7 @@ fi
 chown root:redns $CONFIG
 chmod 0640 $CONFIG
 TOKEN="$(/usr/local/bin/redns key -q -c $CONFIG || true)"
-MODE_NOW="$(grep -m1 -E '^  mode:' $CONFIG | awk '{print $2}')"
+MODE_NOW="$(grep -m1 -E '^  mode:' $CONFIG | awk '{print $2}' || true)"
 
 info "Проверяю конфиг и скачиваю списки"
 runuser -u redns -- /usr/local/bin/redns check -c $CONFIG | tail -n 1
@@ -192,10 +192,13 @@ systemctl enable fail2ban >/dev/null 2>&1 || true
 systemctl restart fail2ban >/dev/null 2>&1 || warn "fail2ban не запустился"
 
 if [[ $FIREWALL -eq 1 ]]; then
-  SSH_PORTS="$(ss -H -ltnp 2>/dev/null | grep -E '"sshd"|"ssh"' | awk '{print $4}' | sed -E 's/.*:([0-9]+)$/\1/' | sort -u | tr '\n' ' ')"
+  SSH_PORTS="$(ss -H -ltnp 2>/dev/null | grep -E '"sshd"|"ssh"' | awk '{print $4}' | sed -E 's/.*:([0-9]+)$/\1/' | sort -u | tr '\n' ' ' || true)"
   [[ -n "${SSH_CONNECTION:-}" ]] && SSH_PORTS="$SSH_PORTS $(echo "$SSH_CONNECTION" | awk '{print $4}')"
   [[ -n "${SSH_PORTS// /}" ]] || SSH_PORTS=22
-  ufw --force reset >/dev/null
+  if [[ ! -f /etc/redns/.firewall ]]; then
+    ufw --force reset >/dev/null
+    touch /etc/redns/.firewall
+  fi
   ufw default deny incoming >/dev/null
   ufw default allow outgoing >/dev/null
   for p in $SSH_PORTS; do ufw limit "$p/tcp" >/dev/null; done

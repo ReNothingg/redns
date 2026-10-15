@@ -39,8 +39,8 @@ type rules struct {
 
 type entry struct {
 	authUntil time.Time
+	openUntil time.Time
 	token     string
-	locked    bool
 	lastSeen  time.Time
 	proto     string
 	queries   uint64
@@ -111,7 +111,7 @@ func (a *Access) Admit(ip netip.Addr, tok, fp string) bool {
 			a.locks[tok], bind = fp, true
 		case fp == "" || bound != fp:
 			key := tok + "|" + fp
-			report := a.now().Sub(a.refused[key]) > time.Hour
+			report := a.now().Sub(a.refused[key]) > time.Hour && len(a.refused) < 10000
 			if report {
 				a.refused[key] = a.now()
 			}
@@ -126,7 +126,7 @@ func (a *Access) Admit(ip netip.Addr, tok, fp string) bool {
 	if bind && a.onBind != nil {
 		a.onBind(tok, fp, info.label())
 	}
-	a.Authorize(ip, tok)
+	a.authorize(ip, tok)
 	a.Seen(ip, tok, fp)
 	return true
 }
@@ -199,6 +199,7 @@ func (a *Access) Update(cfg config.Access, st state.Data) {
 	}
 	a.rules.Store(r)
 	a.mu.Lock()
+	old := a.locks
 	a.locks = map[string]string{}
 	for tok, fp := range st.Locks {
 		if _, ok := r.tokens[tok]; ok {
@@ -206,9 +207,16 @@ func (a *Access) Update(cfg config.Access, st state.Data) {
 		}
 	}
 	for _, e := range a.clients {
-		if _, ok := r.tokens[e.token]; e.token != "" && !ok {
-			e.authUntil = time.Time{}
-			e.token = ""
+		if e.token == "" {
+			continue
+		}
+		prev, wasLocked := old[e.token]
+		cur, isLocked := a.locks[e.token]
+		if _, ok := r.tokens[e.token]; !ok || isLocked && (!wasLocked || prev != cur) {
+			e.authUntil, e.openUntil = time.Time{}, time.Time{}
+			if !ok {
+				e.token = ""
+			}
 		}
 	}
 	a.mu.Unlock()
@@ -270,6 +278,16 @@ func (a *Access) IsOwnName(sni string) bool {
 	return ok && rest == a.host
 }
 
+func (a *Access) BanFor(ip netip.Addr) string {
+	ip = ip.Unmap()
+	for _, p := range a.rules.Load().bans {
+		if p.Contains(ip) {
+			return p.String()
+		}
+	}
+	return ""
+}
+
 func (a *Access) Banned(ip netip.Addr) bool {
 	ip = ip.Unmap()
 	for _, p := range a.rules.Load().bans {
@@ -284,6 +302,15 @@ func (a *Access) Authorize(ip netip.Addr, tok string) {
 	if a.Banned(ip) {
 		return
 	}
+	a.mu.Lock()
+	_, locked := a.locks[tok]
+	a.mu.Unlock()
+	if !locked {
+		a.authorize(ip, tok)
+	}
+}
+
+func (a *Access) authorize(ip netip.Addr, tok string) {
 	r := a.rules.Load()
 	if _, ok := r.tokens[tok]; !ok {
 		return
@@ -291,6 +318,7 @@ func (a *Access) Authorize(ip netip.Addr, tok string) {
 	k := Key(ip)
 	now := a.now()
 	a.mu.Lock()
+	defer a.mu.Unlock()
 	e := a.clients[k]
 	if e == nil {
 		e = &entry{}
@@ -298,8 +326,9 @@ func (a *Access) Authorize(ip netip.Addr, tok string) {
 	}
 	e.authUntil = now.Add(r.ttl)
 	e.token = tok
-	_, e.locked = a.locks[tok]
-	a.mu.Unlock()
+	if _, locked := a.locks[tok]; !locked {
+		e.openUntil = e.authUntil
+	}
 }
 
 func (a *Access) Deauthorize(p netip.Prefix) int {
@@ -307,7 +336,7 @@ func (a *Access) Deauthorize(p netip.Prefix) int {
 	a.mu.Lock()
 	for k, e := range a.clients {
 		if p.Overlaps(k) && !e.authUntil.IsZero() {
-			e.authUntil = time.Time{}
+			e.authUntil, e.openUntil = time.Time{}, time.Time{}
 			n++
 		}
 	}
@@ -331,7 +360,7 @@ func (a *Access) Allowed(ip netip.Addr) bool {
 	}
 	a.mu.Lock()
 	e := a.clients[Key(ip)]
-	ok := e != nil && a.now().Before(e.authUntil) && !e.locked
+	ok := e != nil && a.now().Before(e.openUntil)
 	a.mu.Unlock()
 	return ok
 }
@@ -585,7 +614,7 @@ func (a *Access) Devices() []Device {
 		for ip := range d.IPSeen {
 			d.IPs = append(d.IPs, ip)
 		}
-		sort.Strings(d.IPs)
+		sort.Slice(d.IPs, func(i, j int) bool { return d.IPSeen[d.IPs[i]].After(d.IPSeen[d.IPs[j]]) })
 		out = append(out, *d)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -608,6 +637,11 @@ func (a *Access) GC() {
 	for k, s := range a.bad {
 		if now.After(s.until) && now.Sub(s.first) > strikeWindow {
 			delete(a.bad, k)
+		}
+	}
+	for k, at := range a.refused {
+		if now.Sub(at) > time.Hour {
+			delete(a.refused, k)
 		}
 	}
 	tokens := a.rules.Load().tokens

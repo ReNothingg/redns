@@ -110,7 +110,12 @@
       }
       if (!r.ok)
         return r.text().then(function (t) {
-          throw new Error(t.trim() || "HTTP " + r.status);
+          t = t.trim();
+          if (r.status === 404 && t === "404 page not found") {
+            location.reload();
+            throw new Error("unauthorized");
+          }
+          throw new Error(t || "HTTP " + r.status);
         });
       return r.json();
     });
@@ -139,7 +144,10 @@
 
   function route() {
     var v = location.hash.replace("#", "") || "overview";
-    if (!document.querySelector('section[data-view="' + v + '"]'))
+    if (
+      ["overview", "devices", "clients", "bans", "log", "settings"].indexOf(v) <
+      0
+    )
       v = "overview";
     view = v;
     document.querySelectorAll("section[data-view]").forEach(function (s) {
@@ -447,7 +455,7 @@
         var ban = el("button", "btn sm danger", c.banned ? "Разбанить" : "Бан");
         ban.addEventListener("click", function () {
           if (c.banned) {
-            api("POST", "bans/remove", { prefix: c.prefix })
+            api("POST", "bans/remove", { prefix: c.ban_prefix || c.prefix })
               .then(refresh)
               .catch(fail);
             return;
@@ -756,7 +764,7 @@
         var logb = el("button", "btn sm ghost", "Журнал");
         logb.disabled = !d.ips.length;
         logb.addEventListener("click", function () {
-          logQuery = d.ips[0].split("/")[0];
+          logQuery = d.ips[0].split("/")[0].replace(/::$/, ":");
           $("log-filter").value = logQuery;
           location.hash = "#log";
         });
@@ -872,7 +880,11 @@
       press("add-kind", "kind", addKind);
     });
   });
-  $("add-create").addEventListener("click", function () {
+  $("add-cancel").addEventListener("click", function () {
+    $("add-dialog").close();
+  });
+  $("add-step1").addEventListener("submit", function (e) {
+    e.preventDefault();
     var owner = addWho === "me" ? "Я" : $("add-owner").value.trim();
     if (!owner) {
       $("add-error").textContent = "Напиши имя человека";

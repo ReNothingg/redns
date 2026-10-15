@@ -32,8 +32,8 @@ func (f *Fingerprints) Wrap(cfg *tls.Config) *tls.Config {
 	c := cfg.Clone()
 	prev := c.GetConfigForClient
 	c.GetConfigForClient = func(h *tls.ClientHelloInfo) (*tls.Config, error) {
-		if h.Conn != nil && h.Conn.RemoteAddr() != nil {
-			f.put(h.Conn.RemoteAddr().String(), helloFingerprint(h))
+		if h.Conn != nil && h.Conn.RemoteAddr() != nil && h.Conn.LocalAddr() != nil {
+			f.put(h.Conn.LocalAddr().String()+"|"+h.Conn.RemoteAddr().String(), helloFingerprint(h))
 		}
 		if prev != nil {
 			return prev(h)
@@ -46,8 +46,13 @@ func (f *Fingerprints) Wrap(cfg *tls.Config) *tls.Config {
 func (f *Fingerprints) put(addr, fp string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if len(f.m) >= maxFingerprints {
-		return
+	if _, ok := f.m[addr]; !ok && len(f.m) >= maxFingerprints {
+		for k := range f.m {
+			delete(f.m, k)
+			if len(f.m) < maxFingerprints*9/10 {
+				break
+			}
+		}
 	}
 	f.m[addr] = fpEntry{fp: fp, at: time.Now()}
 }

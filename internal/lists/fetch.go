@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -88,6 +89,13 @@ func writeAtomic(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmp.Name())
 		return err
+	}
+	if os.Geteuid() == 0 {
+		if st, err := os.Stat(filepath.Dir(path)); err == nil {
+			if sys, ok := st.Sys().(*syscall.Stat_t); ok {
+				_ = os.Chown(tmp.Name(), int(sys.Uid), int(sys.Gid))
+			}
+		}
 	}
 	return os.Rename(tmp.Name(), path)
 }

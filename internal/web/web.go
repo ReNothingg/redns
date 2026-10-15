@@ -294,7 +294,9 @@ func (w *Web) speedTest(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/octet-stream")
 	rw.Header().Set("Content-Length", strconv.Itoa(mb<<20))
 	rw.Header().Set("Cache-Control", "no-store")
+	rc := http.NewResponseController(rw)
 	for i := 0; i < mb; i++ {
+		_ = rc.SetWriteDeadline(time.Now().Add(15 * time.Second))
 		if _, err := rw.Write(w.testBuf); err != nil {
 			return
 		}

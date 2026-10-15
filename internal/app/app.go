@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/netip"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -72,13 +74,11 @@ func New(ctx context.Context, cfg *config.Config, version string) (*App, error) 
 	accCfg := cfg.Access
 	a.accCfg.Store(&accCfg)
 	hash := cfg.Admin.PasswordHash
-	if old := a.pwHash.Swap(&hash); old != nil && *old != hash {
-		a.audit.Warn("Пароль админки сменён, все входы сброшены", "", "")
-	}
+	a.pwHash.Store(&hash)
 	a.adminPub.Store(cfg.Admin.Public)
 	a.access = access.New(cfg.Hostname, cfg.Access, store.Get())
 	a.access.OnBlock(func(p netip.Prefix) {
-		a.audit.Warn("Подбор ключа: IP заблокирован на час", p.String(), "")
+		a.audit.Warn("Подбор ключа: 10 неверных ключей за 10 минут", p.String(), "")
 	})
 	a.access.OnNewClient(func(label string, clients int) {
 		a.audit.Warn("Ключ используется ещё одним устройством или программой", "", fmt.Sprintf("%s · клиентов: %d", label, clients))
@@ -295,6 +295,9 @@ func (a *App) Reload(ctx context.Context) error {
 		return err
 	}
 
+	if !reflect.DeepEqual(cfg.Proxy.Exits, a.cfg.Proxy.Exits) || !reflect.DeepEqual(cfg.Proxy.Forwards, a.cfg.Proxy.Forwards) {
+		return errors.New("proxy.exits и proxy.forwards применяются только перезапуском: sudo systemctl restart redns")
+	}
 	merged := *a.cfg
 	merged.Access = cfg.Access
 	merged.Proxy.Lists = cfg.Proxy.Lists
@@ -308,7 +311,9 @@ func (a *App) Reload(ctx context.Context) error {
 	accCfg := cfg.Access
 	a.accCfg.Store(&accCfg)
 	hash := cfg.Admin.PasswordHash
-	a.pwHash.Store(&hash)
+	if old := a.pwHash.Swap(&hash); old != nil && *old != hash {
+		a.audit.Warn("Пароль админки сменён, все входы сброшены", "", "")
+	}
 	a.adminPub.Store(cfg.Admin.Public)
 	a.access.Update(cfg.Access, a.store.Get())
 	a.res.SetPolicy(pol)

@@ -28,15 +28,20 @@ type ClientStat struct {
 	Hosts    []string  `json:"hosts"`
 }
 
+const maxClients = 200000
+
 func (p *Proxy) acquire(ip netip.Addr, c net.Conn, host string) bool {
-	if p.o.MaxConns > 0 && p.active.Load() >= int64(p.o.MaxConns) {
-		return false
-	}
 	k := access.Key(ip)
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.o.MaxConns > 0 && p.active.Load() >= int64(p.o.MaxConns) {
+		return false
+	}
 	cs := p.clients[k]
 	if cs == nil {
+		if len(p.clients) >= maxClients {
+			return false
+		}
 		cs = &clientStat{conns: map[net.Conn]struct{}{}, hosts: map[string]uint64{}}
 		p.clients[k] = cs
 	}

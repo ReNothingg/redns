@@ -55,7 +55,7 @@ func (h *Handler) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 		if cs, ok := w.(dns.ConnectionStater); ok {
 			if st := cs.ConnectionState(); st != nil {
 				c.Token = h.Access.TokenFromSNI(ip, st.ServerName)
-				c.FP = h.FP.Get(w.RemoteAddr().String())
+				c.FP = h.FP.Get(w.LocalAddr().String() + "|" + w.RemoteAddr().String())
 			}
 		}
 	}

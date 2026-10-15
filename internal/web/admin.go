@@ -41,8 +41,10 @@ type admin struct {
 	w *Web
 
 	mu       sync.Mutex
+	updMu    sync.Mutex
 	sessions map[string]*session
 	fails    map[netip.Prefix]failState
+	bcrypt   chan struct{}
 	now      func() time.Time
 }
 
@@ -138,10 +140,11 @@ func (a *admin) record(r *http.Request, warn bool, action, detail string) {
 type failState struct {
 	n     int
 	until time.Time
+	last  time.Time
 }
 
 func newAdmin(w *Web) *admin {
-	a := &admin{w: w, sessions: map[string]*session{}, fails: map[netip.Prefix]failState{}, now: time.Now}
+	a := &admin{w: w, sessions: map[string]*session{}, fails: map[netip.Prefix]failState{}, bcrypt: make(chan struct{}, 4), now: time.Now}
 	if w.o.SessionsPath != "" {
 		a.loadSessions()
 	}
@@ -286,15 +289,6 @@ func (a *admin) login(rw http.ResponseWriter, r *http.Request) {
 	}
 	k := access.Key(remoteIP(r))
 	now := a.now()
-	a.mu.Lock()
-	f := a.fails[k]
-	a.mu.Unlock()
-	if now.Before(f.until) {
-		a.record(r, true, "Вход отклонён: IP заблокирован после неверных паролей", "")
-		rw.Header().Set("Retry-After", strconv.Itoa(int(f.until.Sub(now).Seconds())+1))
-		http.Error(rw, "too many attempts", http.StatusTooManyRequests)
-		return
-	}
 	var body struct {
 		Password string `json:"password"`
 	}
@@ -302,21 +296,45 @@ func (a *admin) login(rw http.ResponseWriter, r *http.Request) {
 		http.Error(rw, "bad request", http.StatusBadRequest)
 		return
 	}
-	if bcrypt.CompareHashAndPassword([]byte(a.w.o.PasswordHash()), []byte(body.Password)) != nil {
-		a.mu.Lock()
-		f := a.fails[k]
+	a.mu.Lock()
+	if len(a.fails) > 1000 {
+		for key, f := range a.fails {
+			if now.After(f.until) && now.Sub(f.last) > lockout {
+				delete(a.fails, key)
+			}
+		}
+	}
+	f := a.fails[k]
+	locked := now.Before(f.until)
+	if !locked {
 		f.n++
-		if f.n >= maxFails {
-			f = failState{until: now.Add(lockout)}
+		f.last = now
+		if f.n > maxFails {
+			f.until, locked = now.Add(lockout), true
 		}
 		a.fails[k] = f
-		a.mu.Unlock()
-		if f.n == 0 {
+	}
+	attempt := f.n
+	a.mu.Unlock()
+	if locked {
+		a.record(r, true, "Вход отклонён: IP заблокирован после неверных паролей", "")
+		rw.Header().Set("Retry-After", strconv.Itoa(int(time.Until(f.until).Seconds())+1))
+		http.Error(rw, "too many attempts", http.StatusTooManyRequests)
+		return
+	}
+	a.bcrypt <- struct{}{}
+	err := bcrypt.CompareHashAndPassword([]byte(a.w.o.PasswordHash()), []byte(body.Password))
+	<-a.bcrypt
+	if err != nil {
+		if attempt >= maxFails {
+			a.mu.Lock()
+			a.fails[k] = failState{n: attempt, until: now.Add(lockout), last: now}
+			a.mu.Unlock()
 			a.record(r, true, "Неверный пароль, вход заблокирован на 15 минут", "")
 		} else {
 			a.record(r, true, "Неверный пароль", "")
 		}
-		http.Error(rw, "wrong password", http.StatusUnauthorized)
+		http.Error(rw, "wrong password", http.StatusForbidden)
 		return
 	}
 	raw := make([]byte, 32)
@@ -371,21 +389,22 @@ func (a *admin) overview(rw http.ResponseWriter, r *http.Request) {
 }
 
 type clientRow struct {
-	Prefix   string    `json:"prefix"`
-	Device   string    `json:"device,omitempty"`
-	Own      bool      `json:"own"`
-	You      bool      `json:"you"`
-	Banned   bool      `json:"banned"`
-	Authed   bool      `json:"authorized"`
-	DNSSeen  time.Time `json:"dns_seen,omitempty"`
-	Proto    string    `json:"proto,omitempty"`
-	Queries  uint64    `json:"queries"`
-	Active   int       `json:"active"`
-	Conns    uint64    `json:"conns"`
-	Up       uint64    `json:"up"`
-	Down     uint64    `json:"down"`
-	LastSeen time.Time `json:"last_seen"`
-	Hosts    []string  `json:"hosts,omitempty"`
+	Prefix    string    `json:"prefix"`
+	Device    string    `json:"device,omitempty"`
+	Own       bool      `json:"own"`
+	You       bool      `json:"you"`
+	Banned    bool      `json:"banned"`
+	BanPrefix string    `json:"ban_prefix,omitempty"`
+	Authed    bool      `json:"authorized"`
+	DNSSeen   time.Time `json:"dns_seen,omitempty"`
+	Proto     string    `json:"proto,omitempty"`
+	Queries   uint64    `json:"queries"`
+	Active    int       `json:"active"`
+	Conns     uint64    `json:"conns"`
+	Up        uint64    `json:"up"`
+	Down      uint64    `json:"down"`
+	LastSeen  time.Time `json:"last_seen"`
+	Hosts     []string  `json:"hosts,omitempty"`
 }
 
 func (a *admin) clients(rw http.ResponseWriter, r *http.Request) {
@@ -418,7 +437,8 @@ func (a *admin) clients(rw http.ResponseWriter, r *http.Request) {
 	out := make([]*clientRow, 0, len(rows))
 	for _, row := range rows {
 		if p, err := netip.ParsePrefix(row.Prefix); err == nil {
-			row.Banned = o.Access.Banned(p.Addr())
+			row.BanPrefix = o.Access.BanFor(p.Addr())
+			row.Banned = row.BanPrefix != ""
 		}
 		out = append(out, row)
 	}
@@ -518,6 +538,8 @@ func decode(r *http.Request, v any) error {
 }
 
 func (a *admin) update(rw http.ResponseWriter, fn func(*state.Data) error) bool {
+	a.updMu.Lock()
+	defer a.updMu.Unlock()
 	d, err := a.w.o.Store.Update(fn)
 	if err != nil {
 		http.Error(rw, err.Error(), http.StatusBadRequest)
@@ -808,6 +830,9 @@ func (a *admin) unban(rw http.ResponseWriter, r *http.Request) {
 			if b.Prefix != body.Prefix {
 				kept = append(kept, b)
 			}
+		}
+		if len(kept) == len(d.Bans) {
+			return errors.New("такого бана нет")
 		}
 		d.Bans = kept
 		return nil

@@ -19,7 +19,11 @@
       content="#1a1a1a"
     />
     <title>ReDNS · {{.Host}}</title>
-    <link rel="icon" type="image/svg+xml" href="/assets/icons/logo.svg?v={{.Assets}}" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="/assets/icons/logo.svg?v={{.Assets}}"
+    />
     <link rel="stylesheet" href="/assets/css/admin.css?v={{.Assets}}" />
   </head>
   <body>
@@ -322,8 +326,8 @@
         </div>
         <p class="error" id="add-error"></p>
         <div class="dialog-actions">
-          <button class="btn ghost" value="cancel" formnovalidate>Отмена</button
-          ><button class="btn" type="button" id="add-create">Создать</button>
+          <button class="btn ghost" type="button" id="add-cancel">Отмена</button
+          ><button class="btn" type="submit" id="add-create">Создать</button>
         </div>
       </form>
       <div class="dialog-body hidden" id="add-step2"></div>
