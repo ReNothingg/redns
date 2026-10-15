@@ -103,6 +103,15 @@
   color: var(--muted);
 }
 
+.side-foot .ver {
+  color: inherit;
+  text-decoration: none;
+}
+
+.side-foot .ver:hover {
+  color: var(--fg);
+}
+
 .content {
   padding: 28px 32px 56px;
   width: 100%;

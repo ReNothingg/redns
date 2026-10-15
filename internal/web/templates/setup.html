@@ -463,7 +463,14 @@
       </section>
 
       <footer>
-        <span>ReDNS {{.Version}}</span
+        <span
+          >ReDNS {{.Version}} ·
+          <a
+            href="https://renothingg.github.io/?contact"
+            target="_blank"
+            rel="noopener"
+            >автор</a
+          ></span
         ><span
           >{{if .Admin}}<a href="/admin">Админка</a>{{else if .TokenName}}ключ:
           {{.TokenName}}{{end}}</span
