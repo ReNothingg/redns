@@ -75,7 +75,7 @@
         box.textContent = "";
         if (s.load >= 0)
           stat(box, "Нагрузка", s.load + "% · " + (levels[s.level] || ""));
-        if (s.memory >= 0) stat(box, "Память", s.memory + "%");
+        stat(box, "ReDNS занимает", s.memory_mb + " МБ");
         stat(box, "Соединений", String(s.conns));
         stat(box, "Без перезапуска", duration(s.uptime_sec));
         if (proto) stat(box, "Протокол", protos[proto] || proto);

@@ -6,7 +6,6 @@ import (
 	"html/template"
 	"net/http"
 	"net/netip"
-	"os"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -217,7 +216,7 @@ func (w *Web) probe(rw http.ResponseWriter, r *http.Request) {
 
 type statusResp struct {
 	Load     int    `json:"load"`
-	Memory   int    `json:"memory"`
+	MemoryMB int    `json:"memory_mb"`
 	Conns    int64  `json:"conns"`
 	Uptime   int    `json:"uptime_sec"`
 	Level    string `json:"level"`
@@ -230,33 +229,13 @@ func (w *Web) status(rw http.ResponseWriter, r *http.Request) {
 		http.NotFound(rw, r)
 		return
 	}
-	s := statusResp{Load: -1, Memory: -1, Hostname: w.o.Host}
-	if raw, err := os.ReadFile("/proc/loadavg"); err == nil {
-		if f := strings.Fields(string(raw)); len(f) > 0 {
-			if v, err := strconv.ParseFloat(f[0], 64); err == nil {
-				s.Load = min(100, int(v/float64(runtime.NumCPU())*100+0.5))
-			}
-		}
+	s := statusResp{Load: -1, Hostname: w.o.Host}
+	if load, ok := systemLoad(); ok {
+		s.Load = min(100, int(load/float64(runtime.NumCPU())*100+0.5))
 	}
-	if raw, err := os.ReadFile("/proc/meminfo"); err == nil {
-		var total, avail float64
-		for _, line := range strings.Split(string(raw), "\n") {
-			f := strings.Fields(line)
-			if len(f) < 2 {
-				continue
-			}
-			v, _ := strconv.ParseFloat(f[1], 64)
-			switch f[0] {
-			case "MemTotal:":
-				total = v
-			case "MemAvailable:":
-				avail = v
-			}
-		}
-		if total > 0 {
-			s.Memory = int((total-avail)/total*100 + 0.5)
-		}
-	}
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	s.MemoryMB = int((ms.Sys + 512<<10) >> 20)
 	if w.o.Stats != nil {
 		s.Conns = w.o.Stats.ConnsActive.Load()
 		s.Uptime = int(time.Since(w.o.Stats.Started).Seconds())
