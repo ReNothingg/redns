@@ -19,8 +19,9 @@ var files embed.FS
 var (
 	setupTmpl    = template.Must(template.ParseFS(files, "templates/setup.html"))
 	adminTmpl    = template.Must(template.ParseFS(files, "templates/admin.html"))
+	statusTmpl   = template.Must(template.ParseFS(files, "templates/status.html"))
 	icons        = sprite()
-	styles       = map[string][]byte{"css/admin.css": bundle("css/admin.css"), "css/setup.css": bundle("css/setup.css")}
+	styles       = map[string][]byte{"css/admin.css": bundle("css/admin.css"), "css/setup.css": bundle("css/setup.css"), "css/status.css": bundle("css/status.css")}
 	assetVersion = version()
 )
 

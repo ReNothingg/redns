@@ -47,8 +47,11 @@ type Resolver struct {
 	access *access.Access
 	stats  *stats.Stats
 	hinter Hinter
+	probes *Probes
 	sf     singleflight.Group
 }
+
+func (r *Resolver) SetProbes(p *Probes) { r.probes = p }
 
 func NewResolver(opt Options, p *Policy, cache *Cache, up *Upstream, acc *access.Access, st *stats.Stats, h Hinter) *Resolver {
 	if opt.AnswerTTL == 0 {
@@ -115,6 +118,7 @@ func (r *Resolver) resolveIN(ctx context.Context, req *dns.Msg, q dns.Question, 
 	act, _ := p.Decide(name)
 	switch act {
 	case ActSelf:
+		r.probes.record(name, c.Proto)
 		return r.addrReply(req, q, r.opt.IPv4, r.opt.IPv6, r.opt.AnswerTTL), "self"
 	case ActHosts:
 		var v4, v6 []netip.Addr

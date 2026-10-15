@@ -67,35 +67,58 @@
     d.appendChild(dd);
     $("facts").appendChild(d);
   }
-  function ago(s) {
-    s = Number(s) || 0;
-    if (s < 5) return "только что";
-    return s < 60
-      ? s + " с назад"
-      : s < 3600
-        ? Math.round(s / 60) + " мин назад"
-        : Math.round(s / 3600) + " ч назад";
-  }
   var protos = { doh: "DoH", dot: "DoT", doq: "DoQ", udp: "UDP", tcp: "TCP" };
 
-  fetch("/api/whoami", { cache: "no-store" })
-    .then(function (r) {
+  function probe() {
+    var b = new Uint8Array(8);
+    crypto.getRandomValues(b);
+    var n = Array.prototype.map
+      .call(b, function (x) {
+        return ("0" + x.toString(16)).slice(-2);
+      })
+      .join("");
+    new Image().src = "https://p-" + n + "." + location.hostname + "/api/pixel";
+    var tries = 0;
+    return new Promise(function (resolve) {
+      function poll() {
+        fetch("/api/probe?n=" + n, { cache: "no-store" })
+          .then(function (r) {
+            return r.json();
+          })
+          .then(function (d) {
+            if (d.seen || ++tries >= 10) resolve(d);
+            else setTimeout(poll, 500);
+          })
+          .catch(function () {
+            if (++tries >= 10) resolve({ seen: false });
+            else setTimeout(poll, 500);
+          });
+      }
+      setTimeout(poll, 400);
+    });
+  }
+
+  Promise.all([
+    fetch("/api/whoami", { cache: "no-store" }).then(function (r) {
       return r.json();
-    })
-    .then(function (w) {
-      if (w.using_dns) {
+    }),
+    probe(),
+  ])
+    .then(function (res) {
+      var w = res[0],
+        p = res[1];
+      if (p.seen) {
         state(
           "ok",
           "Работает",
           "Запросы с этого устройства идут через ReDNS. Заблокированные сервисы открываются через сервер.",
         );
-        fact("протокол", protos[w.proto] || w.proto);
-        fact("запрос", ago(w.seconds_ago));
+        fact("протокол", protos[p.proto] || p.proto);
       } else {
         state(
           "warn",
           "Не подключено",
-          "С этого IP запросов к ReDNS нет. Поставь профиль ниже и обнови страницу. Если включены VPN или Частный узел iCloud, DNS идёт мимо.",
+          "Это устройство ходит в DNS мимо ReDNS. Поставь профиль ниже и обнови страницу. Если включены VPN или Частный узел iCloud, DNS идёт мимо.",
         );
       }
       fact("ip", w.ip);

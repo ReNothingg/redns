@@ -365,6 +365,8 @@ func (a *Access) Allowed(ip netip.Addr) bool {
 	return ok
 }
 
+func (a *Access) Known(ip netip.Addr) bool { return a.Allowed(ip) || a.authorized(ip) }
+
 func (a *Access) authorized(ip netip.Addr) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()

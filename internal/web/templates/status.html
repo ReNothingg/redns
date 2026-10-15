@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="color-scheme" content="light dark" />
+    <title>DNS</title>
+    <link rel="stylesheet" href="/assets/css/status.css?v={{.Assets}}" />
+  </head>
+  <body class="wait" id="page">
+    <main class="status">
+      <h1 id="state">Проверяю…</h1>
+      <p id="note">Смотрю, через какой DNS ходит это устройство.</p>
+      <dl class="stats hidden" id="stats"></dl>
+      <button class="again hidden" id="again" type="button">
+        Проверить ещё раз
+      </button>
+    </main>
+    <script src="/assets/js/status.js?v={{.Assets}}"></script>
+  </body>
+</html>

@@ -1,0 +1,92 @@
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  color: var(--fg);
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
+}
+
+body.ok {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+body.bad {
+  background: var(--down);
+  color: #ffffff;
+}
+
+.status {
+  width: 100%;
+  max-width: 960px;
+  padding: max(24px, env(safe-area-inset-top)) 24px
+    max(32px, env(safe-area-inset-bottom));
+  text-align: center;
+}
+
+.status h1 {
+  font-size: clamp(56px, 15vw, 168px);
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 0.95;
+}
+
+body.wait .status h1 {
+  color: var(--muted);
+}
+
+.status p {
+  margin: 20px auto 0;
+  max-width: 34em;
+  font-size: clamp(16px, 2.4vw, 20px);
+  line-height: 1.45;
+  opacity: 0.8;
+}
+
+.stats {
+  margin-top: 40px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.stats div {
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(13, 13, 13, 0.1);
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 15px;
+}
+
+.stats dt {
+  opacity: 0.7;
+}
+
+.stats dd {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.again {
+  margin-top: 32px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 15px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.again:hover {
+  opacity: 1;
+}

@@ -6,7 +6,9 @@ import (
 	"html/template"
 	"net/http"
 	"net/netip"
+	"os"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/renothingg/redns/internal/access"
 	"github.com/renothingg/redns/internal/audit"
+	"github.com/renothingg/redns/internal/dnsx"
 	"github.com/renothingg/redns/internal/proxy"
 	"github.com/renothingg/redns/internal/state"
 	"github.com/renothingg/redns/internal/stats"
@@ -46,6 +49,7 @@ type Options struct {
 	Audit        *audit.Log
 	SessionsPath string
 	KeyedDoT     func() bool
+	Probes       *dnsx.Probes
 }
 
 type Web struct {
@@ -73,12 +77,15 @@ func (w *Web) HTTPS() http.Handler {
 	})
 	mux.Handle("/assets/", http.StripPrefix("/assets/", staticFiles()))
 	mux.HandleFunc("/api/whoami", w.whoami)
+	mux.HandleFunc("/api/probe", w.probe)
+	mux.HandleFunc("/api/pixel", func(rw http.ResponseWriter, r *http.Request) { rw.WriteHeader(http.StatusNoContent) })
+	mux.HandleFunc("/api/status", w.status)
 	mux.HandleFunc("/api/test", w.speedTest)
 	mux.HandleFunc("/setup/", w.setup)
 	mux.Handle("/admin", w.admin)
 	mux.Handle("/admin/", w.admin)
 	mux.HandleFunc("/", w.index)
-	return w.ownHostOnly(w.noBanned(securityHeaders(mux)))
+	return w.ownHostOnly(w.noBanned(securityHeaders(w.o.Host, mux)))
 }
 
 func (w *Web) HTTP() http.Handler {
@@ -111,14 +118,15 @@ func (w *Web) noBanned(next http.Handler) http.Handler {
 	})
 }
 
-func securityHeaders(next http.Handler) http.Handler {
+func securityHeaders(host string, next http.Handler) http.Handler {
+	csp := "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://*." + host + "; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		h := rw.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Strict-Transport-Security", "max-age=31536000")
-		h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+		h.Set("Content-Security-Policy", csp)
 		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), interest-cohort=()")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
 		h.Set("Cross-Origin-Resource-Policy", "same-origin")
@@ -185,11 +193,87 @@ func (w *Web) data(tok string) pageData {
 }
 
 func (w *Web) index(rw http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" || w.o.Access.Private() {
+	if r.URL.Path != "/" {
 		http.NotFound(rw, r)
 		return
 	}
+	if w.o.Access.Private() {
+		render(rw, statusTmpl, map[string]string{"Host": w.o.Host, "Assets": assetVersion})
+		return
+	}
 	render(rw, setupTmpl, w.data(""))
+}
+
+func (w *Web) probe(rw http.ResponseWriter, r *http.Request) {
+	nonce, ok := dnsx.ProbeNonce("p-" + r.URL.Query().Get("n"))
+	if !ok || w.o.Probes == nil {
+		http.Error(rw, "bad request", http.StatusBadRequest)
+		return
+	}
+	proto, seen := w.o.Probes.Seen(nonce)
+	rw.Header().Set("Cache-Control", "no-store")
+	writeJSON(rw, map[string]any{"seen": seen, "proto": proto})
+}
+
+type statusResp struct {
+	Load     int    `json:"load"`
+	Memory   int    `json:"memory"`
+	Conns    int64  `json:"conns"`
+	Uptime   int    `json:"uptime_sec"`
+	Level    string `json:"level"`
+	Queries  uint64 `json:"queries"`
+	Hostname string `json:"host"`
+}
+
+func (w *Web) status(rw http.ResponseWriter, r *http.Request) {
+	if !w.o.Access.Known(remoteIP(r)) {
+		http.NotFound(rw, r)
+		return
+	}
+	s := statusResp{Load: -1, Memory: -1, Hostname: w.o.Host}
+	if raw, err := os.ReadFile("/proc/loadavg"); err == nil {
+		if f := strings.Fields(string(raw)); len(f) > 0 {
+			if v, err := strconv.ParseFloat(f[0], 64); err == nil {
+				s.Load = min(100, int(v/float64(runtime.NumCPU())*100+0.5))
+			}
+		}
+	}
+	if raw, err := os.ReadFile("/proc/meminfo"); err == nil {
+		var total, avail float64
+		for _, line := range strings.Split(string(raw), "\n") {
+			f := strings.Fields(line)
+			if len(f) < 2 {
+				continue
+			}
+			v, _ := strconv.ParseFloat(f[1], 64)
+			switch f[0] {
+			case "MemTotal:":
+				total = v
+			case "MemAvailable:":
+				avail = v
+			}
+		}
+		if total > 0 {
+			s.Memory = int((total-avail)/total*100 + 0.5)
+		}
+	}
+	if w.o.Stats != nil {
+		s.Conns = w.o.Stats.ConnsActive.Load()
+		s.Uptime = int(time.Since(w.o.Stats.Started).Seconds())
+		s.Queries = w.o.Stats.Queries.Load()
+	}
+	switch {
+	case s.Load < 0:
+		s.Level = "unknown"
+	case s.Load < 50:
+		s.Level = "low"
+	case s.Load < 80:
+		s.Level = "medium"
+	default:
+		s.Level = "high"
+	}
+	rw.Header().Set("Cache-Control", "no-store")
+	writeJSON(rw, s)
 }
 
 func render(rw http.ResponseWriter, t *template.Template, data any) {

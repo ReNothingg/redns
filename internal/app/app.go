@@ -49,6 +49,7 @@ type App struct {
 	proxy    *proxy.Proxy
 	certs    *certs.Manager
 	fp       *dnsx.Fingerprints
+	probes   *dnsx.Probes
 
 	infos   atomic.Pointer[[]ListInfo]
 	reloadM sync.Mutex
@@ -123,6 +124,8 @@ func New(ctx context.Context, cfg *config.Config, version string) (*App, error) 
 		ServeStale: cfg.Cache.ServeStale,
 		Prefetch:   cfg.Cache.Prefetch,
 	}, pol, cache, up, a.access, a.stats, a.hints)
+	a.probes = dnsx.NewProbes()
+	a.res.SetProbes(a.probes)
 	a.limiter = dnsx.NewLimiter(cfg.Access.RateLimit)
 
 	a.certs, err = certs.New(cfg, a.access)
@@ -173,6 +176,7 @@ func (a *App) Start(ctx context.Context) error {
 		Host: cfg.Hostname, IPv4: cfg.PublicIPv4, IPv6: cfg.PublicIPv6,
 		Access:  a.access,
 		DoH:     &dnsx.DoH{R: a.res, Access: a.access, FP: a.fp},
+		Probes:  a.probes,
 		Version: a.version,
 		Info: func() web.Info {
 			p := a.res.Policy()
