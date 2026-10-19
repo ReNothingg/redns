@@ -321,6 +321,14 @@
     renderBans(o.bans || []);
   }
 
+  function operatorNames(list) {
+    var out = [];
+    (list || []).forEach(function (o) {
+      if (o.name && out.indexOf(o.name) < 0) out.push(o.name);
+    });
+    return out;
+  }
+
   function title(c) {
     return add(
       el("div", "title"),
@@ -419,6 +427,8 @@
     shown.forEach(function (c) {
       var on = online(c);
       var body = add(el("div", "grow"), title(c));
+      if (c.operator)
+        body.appendChild(add(el("div", "meta"), el("span", null, c.operator)));
       if (c.hosts && c.hosts.length)
         body.appendChild(el("div", "hosts", c.hosts.join("  ")));
       var main = add(
@@ -690,7 +700,8 @@
       );
       var table = el("div", "table");
       devs.forEach(function (d) {
-        var shared = d.clients > 1 || d.networks > 4;
+        var shared = !!d.shared;
+        var ops = operatorNames(d.operators);
         var t = add(
           el("div", "title"),
           el("span", null, d.name),
@@ -718,11 +729,13 @@
           d.down || d.up
             ? el("span", null, "↓ " + bytes(d.down) + "  ↑ " + bytes(d.up))
             : null,
-          d.networks > 1
+          ops.length
             ? el(
                 "span",
                 null,
-                plural(d.networks, "сеть", "сети", "сетей") + " за сутки",
+                ops.length > 3
+                  ? ops.slice(0, 3).join(", ") + " и ещё " + (ops.length - 3)
+                  : ops.join(", "),
               )
             : null,
           d.clients > 1
@@ -747,9 +760,13 @@
               el(
                 "span",
                 null,
-                d.clients > 1
-                  ? "Ключом пользуются разные системы или программы. Если это не обновление и не твой второй браузер, ключ поставили куда-то ещё. Кнопка «Привязать» оставит его только на одном клиенте."
-                  : "Ключ приходил из многих сетей за сутки. Возможно, им поделились.",
+                d.shared === "places"
+                  ? "Запросы с этим ключом шли одновременно через разных операторов" +
+                      (ops.length > 1 ? " (" + ops.join(", ") + ")" : "") +
+                      ". Одно устройство так не умеет: оно переходит между Wi-Fi, мобильным интернетом и VPN по очереди. Похоже, ключ стоит ещё где-то."
+                  : "Ключом попеременно пользуются разные системы или программы: " +
+                      d.clients +
+                      ". Обновление так не выглядит, после него старый клиент больше не появляется. Если это не твой второй браузер, ключ поставили куда-то ещё. Кнопка «Привязать» оставит его только на одном клиенте.",
               ),
               reset,
             ),

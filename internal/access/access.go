@@ -1,6 +1,7 @@
 package access
 
 import (
+	"fmt"
 	"net/netip"
 	"sort"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/renothingg/redns/internal/asn"
 	"github.com/renothingg/redns/internal/config"
 	"github.com/renothingg/redns/internal/state"
 )
@@ -47,15 +49,46 @@ type entry struct {
 }
 
 type usage struct {
-	last    time.Time
-	queries uint64
-	ips     map[netip.Prefix]time.Time
-	clients map[string]time.Time
+	last       time.Time
+	queries    uint64
+	ips        map[netip.Prefix]time.Time
+	clients    map[string]time.Time
+	places     map[place]*placeSeen
+	placeHits  []time.Time
+	clientHits []time.Time
+	alerted    map[string]time.Time
+	flagged    map[string]time.Time
+}
+
+type place struct {
+	asn uint32
+	v6  bool
+}
+
+type placeSeen struct {
+	at   time.Time
+	info asn.Info
 }
 
 const (
 	maxDeviceIPs     = 32
 	maxDeviceClients = 8
+	maxDevicePlaces  = 16
+)
+
+const (
+	placeWindow  = 3 * time.Minute
+	clientWindow = 24 * time.Hour
+	hitsWindow   = 24 * time.Hour
+	placeBurst   = time.Hour
+	placeShared  = 10
+	clientShared = 3
+	alertEvery   = 12 * time.Hour
+)
+
+const (
+	SharedPlaces  = "places"
+	SharedClients = "clients"
 )
 
 type strikes struct {
@@ -76,22 +109,30 @@ type Access struct {
 	host  string
 	rules atomic.Pointer[rules]
 
-	mu      sync.Mutex
-	clients map[netip.Prefix]*entry
-	used    map[string]*usage
-	locks   map[string]string
-	refused map[string]time.Time
-	bad     map[netip.Prefix]*strikes
-	now     func() time.Time
-	onBlock func(netip.Prefix)
-	onNew   func(label string, clients int)
-	onBind  func(tok, fp, label string)
-	onDeny  func(label string, ip netip.Addr)
+	mu       sync.Mutex
+	clients  map[netip.Prefix]*entry
+	used     map[string]*usage
+	locks    map[string]string
+	refused  map[string]time.Time
+	bad      map[netip.Prefix]*strikes
+	now      func() time.Time
+	asn      *asn.DB
+	onBlock  func(netip.Prefix)
+	onShared func(label, reason, detail string)
+	onBind   func(tok, fp, label string)
+	onDeny   func(label string, ip netip.Addr)
 }
 
 func (a *Access) OnBlock(fn func(netip.Prefix)) { a.onBlock = fn }
 
-func (a *Access) OnNewClient(fn func(label string, clients int)) { a.onNew = fn }
+func (a *Access) OnShared(fn func(label, reason, detail string)) { a.onShared = fn }
+
+func (a *Access) SetASN(db *asn.DB) { a.asn = db }
+
+func (a *Access) Operator(ip netip.Addr) asn.Info {
+	info, _ := a.asn.Lookup(ip)
+	return info
+}
 
 func (a *Access) OnLock(bind func(tok, fp, label string), deny func(label string, ip netip.Addr)) {
 	a.onBind, a.onDeny = bind, deny
@@ -472,11 +513,13 @@ func (a *Access) Seen(ip netip.Addr, tok, fp string) {
 		return
 	}
 	k := Key(ip)
+	op, located := a.asn.Lookup(ip)
+	pl := place{asn: op.ASN, v6: ip.Unmap().Is6()}
 	now := a.now()
 	a.mu.Lock()
 	u := a.used[tok]
 	if u == nil {
-		u = &usage{ips: map[netip.Prefix]time.Time{}, clients: map[string]time.Time{}}
+		u = &usage{ips: map[netip.Prefix]time.Time{}, clients: map[string]time.Time{}, places: map[place]*placeSeen{}, alerted: map[string]time.Time{}, flagged: map[string]time.Time{}}
 		a.used[tok] = u
 	}
 	u.last = now
@@ -484,20 +527,131 @@ func (a *Access) Seen(ip netip.Addr, tok, fp string) {
 	if _, ok := u.ips[k]; ok || len(u.ips) < maxDeviceIPs {
 		u.ips[k] = now
 	}
-	fresh := false
+	if located {
+		if placeInterleaved(u.places, pl, now) {
+			u.placeHits = hit(u.placeHits, now)
+		}
+		if p, ok := u.places[pl]; ok {
+			p.at = now
+		} else if len(u.places) < maxDevicePlaces {
+			u.places[pl] = &placeSeen{at: now, info: op}
+		}
+	}
 	if fp != "" {
-		if _, ok := u.clients[fp]; !ok && len(u.clients) < maxDeviceClients {
-			fresh = len(u.clients) > 0
-			u.clients[fp] = now
-		} else if ok {
+		if clientInterleaved(u.clients, fp, now) {
+			u.clientHits = hit(u.clientHits, now)
+		}
+		if _, ok := u.clients[fp]; ok || len(u.clients) < maxDeviceClients {
 			u.clients[fp] = now
 		}
 	}
-	n := len(u.clients)
-	a.mu.Unlock()
-	if fresh && a.onNew != nil {
-		a.onNew(info.label(), n)
+	if within(u.placeHits, now, placeBurst) >= placeShared {
+		u.flagged[SharedPlaces] = now
 	}
+	if within(u.clientHits, now, hitsWindow) >= clientShared {
+		u.flagged[SharedClients] = now
+	}
+	reason, detail := u.verdict(now), ""
+	if reason != "" && now.Sub(u.alerted[reason]) > alertEvery {
+		u.alerted[reason] = now
+		detail = u.describe(reason, now)
+	} else {
+		reason = ""
+	}
+	a.mu.Unlock()
+	if reason != "" && a.onShared != nil {
+		a.onShared(info.label(), reason, detail)
+	}
+}
+
+func placeInterleaved(seen map[place]*placeSeen, pl place, now time.Time) bool {
+	prev, ok := seen[pl]
+	if !ok || now.Sub(prev.at) > placeWindow {
+		return false
+	}
+	for other, s := range seen {
+		if other != pl && other.v6 == pl.v6 && s.at.After(prev.at) {
+			return true
+		}
+	}
+	return false
+}
+
+func clientInterleaved(seen map[string]time.Time, fp string, now time.Time) bool {
+	prev, ok := seen[fp]
+	if !ok || now.Sub(prev) > clientWindow {
+		return false
+	}
+	for other, at := range seen {
+		if other != fp && at.After(prev) {
+			return true
+		}
+	}
+	return false
+}
+
+func hit(hits []time.Time, now time.Time) []time.Time {
+	m := now.Truncate(time.Minute)
+	if n := len(hits); n > 0 && !hits[n-1].Before(m) {
+		return hits
+	}
+	return append(prune(hits, now), m)
+}
+
+func prune(hits []time.Time, now time.Time) []time.Time {
+	i := 0
+	for i < len(hits) && now.Sub(hits[i]) > hitsWindow {
+		i++
+	}
+	if i == 0 {
+		return hits
+	}
+	return append(hits[:0], hits[i:]...)
+}
+
+func within(hits []time.Time, now time.Time, w time.Duration) int {
+	n := 0
+	for _, h := range hits {
+		if now.Sub(h) <= w {
+			n++
+		}
+	}
+	return n
+}
+
+func (u *usage) verdict(now time.Time) string {
+	for _, r := range []string{SharedPlaces, SharedClients} {
+		if at, ok := u.flagged[r]; ok && now.Sub(at) <= hitsWindow {
+			return r
+		}
+	}
+	return ""
+}
+
+func (u *usage) operators(now time.Time) []Operator {
+	out := []Operator{}
+	for pl, s := range u.places {
+		if now.Sub(s.at) <= hitsWindow {
+			out = append(out, Operator{ASN: pl.asn, Name: s.info.Label(), V6: pl.v6, LastSeen: s.at})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LastSeen.After(out[j].LastSeen) })
+	return out
+}
+
+func (u *usage) describe(reason string, now time.Time) string {
+	if reason == SharedClients {
+		return fmt.Sprintf("клиентов попеременно: %d", len(u.clients))
+	}
+	var names []string
+	seen := map[string]bool{}
+	for _, o := range u.operators(now) {
+		if !seen[o.Name] {
+			seen[o.Name] = true
+			names = append(names, o.Name)
+		}
+	}
+	return strings.Join(names, ", ")
 }
 
 func (a *Access) ResetUsage(tok string) {
@@ -561,28 +715,39 @@ func (a *Access) Clients() []Client {
 	return out
 }
 
+type Operator struct {
+	ASN      uint32    `json:"asn"`
+	Name     string    `json:"name"`
+	V6       bool      `json:"v6,omitempty"`
+	LastSeen time.Time `json:"last_seen"`
+}
+
 type Device struct {
-	Name     string               `json:"name"`
-	Owner    string               `json:"owner"`
-	Kind     string               `json:"kind,omitempty"`
-	Token    string               `json:"token"`
-	Source   string               `json:"source"`
-	Created  time.Time            `json:"created,omitempty"`
-	LastSeen time.Time            `json:"last_seen,omitempty"`
-	IPs      []string             `json:"ips"`
-	Queries  uint64               `json:"queries"`
-	Locked   bool                 `json:"locked"`
-	Bound    bool                 `json:"bound"`
-	Networks int                  `json:"networks"`
-	Clients  int                  `json:"clients"`
-	IPSeen   map[string]time.Time `json:"-"`
+	Name       string               `json:"name"`
+	Owner      string               `json:"owner"`
+	Kind       string               `json:"kind,omitempty"`
+	Token      string               `json:"token"`
+	Source     string               `json:"source"`
+	Created    time.Time            `json:"created,omitempty"`
+	LastSeen   time.Time            `json:"last_seen,omitempty"`
+	IPs        []string             `json:"ips"`
+	Queries    uint64               `json:"queries"`
+	Locked     bool                 `json:"locked"`
+	Bound      bool                 `json:"bound"`
+	Networks   int                  `json:"networks"`
+	Clients    int                  `json:"clients"`
+	Operators  []Operator           `json:"operators"`
+	Shared     string               `json:"shared,omitempty"`
+	PlaceHits  int                  `json:"place_hits"`
+	ClientHits int                  `json:"client_hits"`
+	IPSeen     map[string]time.Time `json:"-"`
 }
 
 func (a *Access) Devices() []Device {
 	r := a.rules.Load()
 	byToken := map[string]*Device{}
 	for tok, info := range r.tokens {
-		byToken[tok] = &Device{Name: info.name, Owner: info.owner, Kind: info.kind, Token: tok, Source: info.source, Created: info.created, IPs: []string{}, IPSeen: map[string]time.Time{}}
+		byToken[tok] = &Device{Name: info.name, Owner: info.owner, Kind: info.kind, Token: tok, Source: info.source, Created: info.created, IPs: []string{}, Operators: []Operator{}, IPSeen: map[string]time.Time{}}
 	}
 	a.mu.Lock()
 	for tok, fp := range a.locks {
@@ -595,7 +760,10 @@ func (a *Access) Devices() []Device {
 		if d == nil {
 			continue
 		}
+		now := a.now()
 		d.LastSeen, d.Queries, d.Clients = u.last, u.queries, len(u.clients)
+		d.Operators, d.Shared = u.operators(now), u.verdict(now)
+		d.PlaceHits, d.ClientHits = within(u.placeHits, now, hitsWindow), within(u.clientHits, now, hitsWindow)
 		for k, at := range u.ips {
 			d.IPSeen[k.String()] = at
 			if a.now().Sub(at) < 24*time.Hour {
@@ -657,6 +825,17 @@ func (a *Access) GC() {
 				delete(u.ips, k)
 			}
 		}
+		for k, p := range u.places {
+			if now.Sub(p.at) > hitsWindow {
+				delete(u.places, k)
+			}
+		}
+		for k, at := range u.clients {
+			if now.Sub(at) > 30*24*time.Hour {
+				delete(u.clients, k)
+			}
+		}
+		u.placeHits, u.clientHits = prune(u.placeHits, now), prune(u.clientHits, now)
 	}
 	a.mu.Unlock()
 }

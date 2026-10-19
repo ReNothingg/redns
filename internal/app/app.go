@@ -20,6 +20,7 @@ import (
 	"github.com/miekg/dns"
 
 	"github.com/renothingg/redns/internal/access"
+	"github.com/renothingg/redns/internal/asn"
 	"github.com/renothingg/redns/internal/audit"
 	"github.com/renothingg/redns/internal/certs"
 	"github.com/renothingg/redns/internal/config"
@@ -50,6 +51,7 @@ type App struct {
 	certs    *certs.Manager
 	fp       *dnsx.Fingerprints
 	probes   *dnsx.Probes
+	asn      *asn.DB
 
 	infos   atomic.Pointer[[]ListInfo]
 	reloadM sync.Mutex
@@ -81,8 +83,17 @@ func New(ctx context.Context, cfg *config.Config, version string) (*App, error) 
 	a.access.OnBlock(func(p netip.Prefix) {
 		a.audit.Warn("Подбор ключа: 10 неверных ключей за 10 минут", p.String(), "")
 	})
-	a.access.OnNewClient(func(label string, clients int) {
-		a.audit.Warn("Ключ используется ещё одним устройством или программой", "", fmt.Sprintf("%s · клиентов: %d", label, clients))
+	a.asn = &asn.DB{}
+	a.access.SetASN(a.asn)
+	a.access.OnShared(func(label, reason, detail string) {
+		action := "Ключ используется одновременно у разных операторов"
+		if reason == access.SharedClients {
+			action = "Ключом попеременно пользуются разные устройства или программы"
+		}
+		if detail != "" {
+			label += " · " + detail
+		}
+		a.audit.Warn(action, "", label)
 	})
 	a.access.OnLock(func(tok, fp, label string) {
 		_, _ = a.store.Update(func(d *state.Data) error {
@@ -256,6 +267,7 @@ func (a *App) Start(ctx context.Context) error {
 
 	a.audit.Info("Сервер запущен", "", a.version)
 	go a.certs.Warm(ctx)
+	go a.loadASN(ctx)
 	go a.maintenance(ctx)
 	slog.Info("ReDNS started",
 		"host", cfg.Hostname, "ipv4", cfg.PublicIPv4, "ipv6", cfg.PublicIPv6, "mode", cfg.Access.Mode,
@@ -266,6 +278,8 @@ func (a *App) Start(ctx context.Context) error {
 func (a *App) maintenance(ctx context.Context) {
 	gc := time.NewTicker(time.Minute)
 	defer gc.Stop()
+	asnRefresh := time.NewTicker(24 * time.Hour)
+	defer asnRefresh.Stop()
 	var refresh <-chan time.Time
 	if a.cfg.Lists.Refresh > 0 {
 		t := time.NewTicker(a.cfg.Lists.Refresh)
@@ -287,8 +301,25 @@ func (a *App) maintenance(ctx context.Context) {
 			if err := a.Reload(ctx); err != nil {
 				slog.Error("list refresh failed", "err", err)
 			}
+		case <-asnRefresh.C:
+			go a.loadASN(ctx)
 		}
 	}
+}
+
+func (a *App) loadASN(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	body, stale, err := a.fetcher.Fetch(ctx, asn.URL)
+	if err != nil {
+		slog.Warn("asn table unavailable", "err", err)
+		return
+	}
+	if err := a.asn.Load(body); err != nil {
+		slog.Warn("asn table broken", "err", err)
+		return
+	}
+	slog.Info("asn table loaded", "ranges", a.asn.Len(), "stale", stale)
 }
 
 func (a *App) Reload(ctx context.Context) error {

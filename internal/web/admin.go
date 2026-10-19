@@ -405,6 +405,7 @@ type clientRow struct {
 	Down      uint64    `json:"down"`
 	LastSeen  time.Time `json:"last_seen"`
 	Hosts     []string  `json:"hosts,omitempty"`
+	Operator  string    `json:"operator,omitempty"`
 }
 
 func (a *admin) clients(rw http.ResponseWriter, r *http.Request) {
@@ -437,6 +438,7 @@ func (a *admin) clients(rw http.ResponseWriter, r *http.Request) {
 	out := make([]*clientRow, 0, len(rows))
 	for _, row := range rows {
 		if p, err := netip.ParsePrefix(row.Prefix); err == nil {
+			row.Operator = o.Access.Operator(p.Addr()).Label()
 			row.BanPrefix = o.Access.BanFor(p.Addr())
 			row.Banned = row.BanPrefix != ""
 		}
@@ -713,7 +715,7 @@ func (a *admin) resetDevice(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.w.o.Access.ResetUsage(body.Token)
-	a.record(r, false, "Сброшены клиенты и сети устройства", label)
+	a.record(r, false, "Сброшены клиенты и операторы устройства", label)
 	writeJSON(rw, map[string]bool{"ok": true})
 }
 
