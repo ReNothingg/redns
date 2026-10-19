@@ -33,6 +33,7 @@ herokucdn.com
 netlify.com
 ngrok.com
 ngrok-agent.com
+trycloudflare.com
 swagger.io
 smartbear.com
 qt.io
