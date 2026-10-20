@@ -428,6 +428,17 @@ func (p *Proxy) dial(ctx context.Context, host string, port int, exit string) (n
 		if !ok {
 			return nil, errors.New("unknown exit " + exit)
 		}
+		if s, ok := config.SocksExit(addr); ok {
+			up, err := p.dialAddr(ctx, s)
+			if err != nil {
+				return nil, err
+			}
+			if err := socksConnect(ctx, up, host, port); err != nil {
+				up.Close()
+				return nil, err
+			}
+			return up, nil
+		}
 		def := strconv.Itoa(port)
 		if port == p.o.HTTPPort {
 

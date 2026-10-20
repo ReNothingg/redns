@@ -357,7 +357,13 @@ func (c *Config) Validate() error {
 		}
 	}
 	for name, addr := range c.Proxy.Exits {
-		if _, _, err := splitHostPortDefault(addr, "443"); err != nil || name == "" {
+		check := addr
+		if s, ok := SocksExit(addr); ok {
+			check = s
+		} else if strings.Contains(addr, "://") {
+			check = ""
+		}
+		if _, _, err := splitHostPortDefault(check, "443"); err != nil || name == "" {
 			errs = append(errs, fmt.Errorf("proxy.exits[%s]: bad address %q", name, addr))
 		}
 	}
@@ -436,6 +442,14 @@ func splitHostPortDefault(addr, port string) (string, string, error) {
 		return "", "", fmt.Errorf("bad address %q", addr)
 	}
 	return h, p, nil
+}
+
+func SocksExit(addr string) (string, bool) {
+	rest, ok := strings.CutPrefix(addr, "socks5://")
+	if !ok || rest == "" {
+		return "", false
+	}
+	return HostPort(rest, "1080"), true
 }
 
 func HostPort(addr, port string) string {

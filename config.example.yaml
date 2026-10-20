@@ -92,6 +92,7 @@ proxy:
         - 'regexp:^ap(-[a-z0-9]+)?\.spotify\.com$'
   # exits:
   #   us: 198.51.100.7
+  #   warp: socks5://127.0.0.1:40000
   max_conns: 20000
   max_conns_per_client: 1000
 
