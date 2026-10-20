@@ -9,3 +9,5 @@ tiktokw.us
 tiktokcdn.com
 byteoversea.com
 ibytedtos.com
+# Unity: api.unity.com на HAProxy отвечает 403 на чужой Host; с общим IP прокси Chrome склеивает его соединения с cloud.unity.com
+api.unity.com
