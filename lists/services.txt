@@ -34,4 +34,5 @@ upwork.com
 wise.com
 transferwise.com
 paddle.com
+fragment.com
 truthsocial.com
