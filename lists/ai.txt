@@ -81,9 +81,9 @@ x.ai
 grok.com
 grokusercontent.com
 grok.x.com
-# Перевод Grok в приложении X проверяет страну на API
-full:api.x.com
-full:api.twitter.com
+# Перевод Grok в X проверяет страну; x.com и api.x.com теперь за Cloudflare, запросы идут и через x.com/i/api
+x.com
+twitter.com
 
 # Редакторы и агенты
 cursor.com
