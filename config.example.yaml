@@ -62,6 +62,9 @@ cache:
 
 proxy:
   lists:
+    # Сайты, которые банят IP хостера, через WARP. Нужен выход warp в exits ниже.
+    # - file: lists/warp.txt
+    #   via: warp
     - lists/ai.txt
     - lists/dev.txt
     - lists/games.txt

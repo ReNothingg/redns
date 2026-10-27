@@ -1,0 +1,6 @@
+# Сайты, которые банят IP хостеров (Cloudflare 1005 и т.п.). Идут через выход warp из proxy.exits.
+# Подключается в config.yaml первым в proxy.lists: - file: lists/warp.txt, via: warp
+unity.com
+unity3d.com
+patreon.com
+patreonusercontent.com

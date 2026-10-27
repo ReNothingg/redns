@@ -199,6 +199,21 @@ full:api.example.com            только этот хост
 regexp:^ap-.*\.spotify\.com$    регулярка
 ```
 
+Некоторые сайты (Patreon, Unity) банят IP хостеров целиком и отвечают ошибкой Cloudflare 1005. Такие домены собраны в `warp.txt`. Чтобы пустить их через [Cloudflare WARP](https://developers.cloudflare.com/warp-client/get-started/linux/), поставь `warp-cli` в режиме прокси (`warp-cli mode proxy`, порт 40000) и добавь в конфиг:
+
+```yaml
+proxy:
+  lists:
+    - file: lists/warp.txt
+      via: warp
+    - lists/ai.txt
+    # ...
+  exits:
+    warp: socks5://127.0.0.1:40000
+```
+
+`warp.txt` должен стоять в списке первым. Без WARP эти сайты идут через обычный прокси.
+
 Применить без перезапуска:
 
 ```bash
