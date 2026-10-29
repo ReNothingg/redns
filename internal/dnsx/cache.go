@@ -1,8 +1,12 @@
 package dnsx
 
 import (
+	"bufio"
+	"encoding/gob"
 	"hash/maphash"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -90,6 +94,8 @@ func (c *Cache) Get(k cacheKey) (e *cacheEntry, fresh bool) {
 	}
 	return nil, false
 }
+
+func (c *Cache) expiredFor(e *cacheEntry) time.Duration { return c.now().Sub(e.expires()) }
 
 func (c *Cache) TTLFor(m *dns.Msg) uint32 {
 	if m == nil || m.Truncated {
@@ -183,4 +189,101 @@ func copyRRs(rrs []dns.RR, age, fixed uint32) []dns.RR {
 		out = append(out, cp)
 	}
 	return out
+}
+
+type dumpEntry struct {
+	Name   string
+	Qtype  uint16
+	DO, CD bool
+	ECS    string
+	Stored int64
+	TTL    uint32
+	Msg    []byte
+}
+
+func (c *Cache) Save(path string) (int, error) {
+	now := c.now()
+	var out []dumpEntry
+	for i := range c.shards {
+		s := &c.shards[i]
+		s.mu.Lock()
+		for k, e := range s.m {
+			if now.After(e.expires().Add(c.stale)) {
+				continue
+			}
+			b, err := e.msg.Pack()
+			if err != nil {
+				continue
+			}
+			d := dumpEntry{Name: k.name, Qtype: k.qtype, DO: k.do, CD: k.cd, Stored: e.stored.UnixNano(), TTL: e.ttl, Msg: b}
+			if k.ecs.IsValid() {
+				d.ECS = k.ecs.String()
+			}
+			out = append(out, d)
+		}
+		s.mu.Unlock()
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return 0, err
+	}
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return 0, err
+	}
+	w := bufio.NewWriter(f)
+	err = gob.NewEncoder(w).Encode(out)
+	if err == nil {
+		err = w.Flush()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(tmp)
+		return 0, err
+	}
+	return len(out), os.Rename(tmp, path)
+}
+
+func (c *Cache) Load(path string) (int, error) {
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	var in []dumpEntry
+	if err := gob.NewDecoder(bufio.NewReader(f)).Decode(&in); err != nil {
+		return 0, err
+	}
+	now := c.now()
+	n := 0
+	for _, d := range in {
+		e := &cacheEntry{stored: time.Unix(0, d.Stored), ttl: d.TTL}
+		if e.stored.After(now) || now.After(e.expires().Add(c.stale)) {
+			continue
+		}
+		m := new(dns.Msg)
+		if m.Unpack(d.Msg) != nil {
+			continue
+		}
+		e.msg = m
+		k := cacheKey{name: d.Name, qtype: d.Qtype, do: d.DO, cd: d.CD}
+		if d.ECS != "" {
+			if k.ecs, err = netip.ParsePrefix(d.ECS); err != nil {
+				continue
+			}
+		}
+		s := c.shard(k)
+		s.mu.Lock()
+		if len(s.m) < c.perShard {
+			s.m[k] = e
+			n++
+		}
+		s.mu.Unlock()
+	}
+	return n, nil
 }

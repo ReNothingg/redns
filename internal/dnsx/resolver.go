@@ -35,9 +35,15 @@ type Options struct {
 	AnswerTTL  uint32
 	ECS        bool
 	ServeStale bool
+	Optimistic time.Duration
 	Prefetch   bool
 	BlockTTL   uint32
 }
+
+const (
+	optimisticTTL  = 10
+	lookupStaleMax = 10 * time.Minute
+)
 
 type Resolver struct {
 	opt    Options
@@ -188,6 +194,11 @@ func (r *Resolver) forward(ctx context.Context, req *dns.Msg, q dns.Question, na
 		}
 		return reply(req, e.msg, e.age(time.Now()), 0), "cache"
 	}
+	if e != nil && r.opt.Optimistic > 0 && r.cache.expiredFor(e) < r.opt.Optimistic {
+		r.stats.StaleServed.Add(1)
+		r.refresh(k, e)
+		return reply(req, e.msg, 0, optimisticTTL), "optimistic"
+	}
 	m, err := r.fetch(ctx, k)
 	if err == nil && m != nil {
 		return reply(req, m, 0, 0), "forward"
@@ -245,14 +256,21 @@ func (r *Resolver) maybePrefetch(k cacheKey, e *cacheEntry) {
 	if e.ttl < 20 || e.hits.Load() < 3 {
 		return
 	}
-	remaining := time.Until(e.expires())
-	if remaining > time.Duration(e.ttl)*time.Second/10 || !e.fetching.CompareAndSwap(false, true) {
+	if time.Until(e.expires()) > time.Duration(e.ttl)*time.Second/10 {
+		return
+	}
+	r.refresh(k, e)
+}
+
+func (r *Resolver) refresh(k cacheKey, e *cacheEntry) {
+	if !e.fetching.CompareAndSwap(false, true) {
 		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), r.up.timeout*2)
 		defer cancel()
 		_, _ = r.fetch(ctx, k)
+		e.fetching.Store(false)
 	}()
 }
 
@@ -273,10 +291,16 @@ func (r *Resolver) LookupNetIP(ctx context.Context, host string, want6 bool) ([]
 			e, fresh := r.cache.Get(k)
 			var m *dns.Msg
 			var err error
-			if fresh {
+			switch {
+			case fresh:
 				m = e.msg
-			} else if m, err = r.fetch(ctx, k); err != nil && e != nil {
-				m, err = e.msg, nil
+			case e != nil && r.opt.Optimistic > 0 && r.cache.expiredFor(e) < min(r.opt.Optimistic, lookupStaleMax):
+				m = e.msg
+				r.refresh(k, e)
+			default:
+				if m, err = r.fetch(ctx, k); err != nil && e != nil {
+					m, err = e.msg, nil
+				}
 			}
 			ch <- res{addrsFrom(m), err}
 		}(t)

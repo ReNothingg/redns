@@ -57,6 +57,7 @@ cache:
   size: 100000
   serve_stale: true
   stale_ttl: 24h
+  optimistic: 12h
   prefetch: true
   max_ttl: 24h
 

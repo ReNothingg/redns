@@ -83,6 +83,7 @@ type Cache struct {
 	Size       int           `yaml:"size"`
 	ServeStale bool          `yaml:"serve_stale"`
 	StaleTTL   time.Duration `yaml:"stale_ttl"`
+	Optimistic time.Duration `yaml:"optimistic"`
 	MinTTL     time.Duration `yaml:"min_ttl"`
 	MaxTTL     time.Duration `yaml:"max_ttl"`
 	Prefetch   bool          `yaml:"prefetch"`
@@ -207,6 +208,7 @@ func Default() *Config {
 			Size:       100000,
 			ServeStale: true,
 			StaleTTL:   24 * time.Hour,
+			Optimistic: 12 * time.Hour,
 			MaxTTL:     24 * time.Hour,
 			Prefetch:   true,
 		},

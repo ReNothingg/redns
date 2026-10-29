@@ -128,11 +128,17 @@ func New(ctx context.Context, cfg *config.Config, version string) (*App, error) 
 		v6 = netip.MustParseAddr(cfg.PublicIPv6)
 	}
 	cache := dnsx.NewCache(cfg.Cache.Size, cfg.Cache.MinTTL, cfg.Cache.MaxTTL, staleWindow(cfg))
+	if n, err := cache.Load(a.cachePath()); err != nil {
+		slog.Warn("dns cache not restored", "err", err)
+	} else if n > 0 {
+		slog.Info("dns cache restored", "entries", n)
+	}
 	a.res = dnsx.NewResolver(dnsx.Options{
 		IPv4: v4, IPv6: v6,
 		AnswerTTL:  uint32(cfg.Proxy.AnswerTTL / time.Second),
 		ECS:        cfg.Upstream.ECS,
 		ServeStale: cfg.Cache.ServeStale,
+		Optimistic: min(cfg.Cache.Optimistic, staleWindow(cfg)),
 		Prefetch:   cfg.Cache.Prefetch,
 	}, pol, cache, up, a.access, a.stats, a.hints)
 	a.probes = dnsx.NewProbes()
@@ -179,6 +185,10 @@ func staleWindow(cfg *config.Config) time.Duration {
 		return 0
 	}
 	return cfg.Cache.StaleTTL
+}
+
+func (a *App) cachePath() string {
+	return filepath.Join(filepath.Dir(a.cfg.Resolve(a.cfg.State)), "dns-cache.gob")
 }
 
 func (a *App) Start(ctx context.Context) error {
@@ -371,6 +381,11 @@ func (a *App) Shutdown(ctx context.Context) {
 	}
 	for _, s := range a.httpSrvs {
 		_ = s.Shutdown(ctx)
+	}
+	if n, err := a.res.Cache().Save(a.cachePath()); err != nil {
+		slog.Warn("dns cache not saved", "err", err)
+	} else {
+		slog.Info("dns cache saved", "entries", n)
 	}
 }
 
