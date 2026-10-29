@@ -139,6 +139,7 @@ func New(ctx context.Context, cfg *config.Config, version string) (*App, error) 
 		ECS:        cfg.Upstream.ECS,
 		ServeStale: cfg.Cache.ServeStale,
 		Optimistic: min(cfg.Cache.Optimistic, staleWindow(cfg)),
+		ClientTTL:  uint32(cfg.Cache.ClientTTL / time.Second),
 		Prefetch:   cfg.Cache.Prefetch,
 	}, pol, cache, up, a.access, a.stats, a.hints)
 	a.probes = dnsx.NewProbes()
@@ -218,7 +219,7 @@ func (a *App) Start(ctx context.Context) error {
 		Handler:           w.HTTPS(),
 		TLSConfig:         a.fp.Wrap(a.certs.TLSConfig()),
 		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		IdleTimeout:       10 * time.Minute,
 		ErrorLog:          quietLog(),
 	}
 	httpSrv := &http.Server{

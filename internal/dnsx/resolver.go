@@ -36,12 +36,13 @@ type Options struct {
 	ECS        bool
 	ServeStale bool
 	Optimistic time.Duration
+	ClientTTL  uint32
 	Prefetch   bool
 	BlockTTL   uint32
 }
 
 const (
-	optimisticTTL  = 10
+	optimisticTTL  = 30
 	lookupStaleMax = 10 * time.Minute
 )
 
@@ -192,7 +193,7 @@ func (r *Resolver) forward(ctx context.Context, req *dns.Msg, q dns.Question, na
 		if r.opt.Prefetch {
 			r.maybePrefetch(k, e)
 		}
-		return reply(req, e.msg, e.age(time.Now()), 0), "cache"
+		return floorTTL(reply(req, e.msg, e.age(time.Now()), 0), r.opt.ClientTTL), "cache"
 	}
 	if e != nil && r.opt.Optimistic > 0 && r.cache.expiredFor(e) < r.opt.Optimistic {
 		r.stats.StaleServed.Add(1)
@@ -201,7 +202,7 @@ func (r *Resolver) forward(ctx context.Context, req *dns.Msg, q dns.Question, na
 	}
 	m, err := r.fetch(ctx, k)
 	if err == nil && m != nil {
-		return reply(req, m, 0, 0), "forward"
+		return floorTTL(reply(req, m, 0, 0), r.opt.ClientTTL), "forward"
 	}
 	r.stats.UpstreamErrs.Add(1)
 	if e != nil && r.opt.ServeStale {
@@ -455,6 +456,17 @@ func (r *Resolver) anyReply(req *dns.Msg) *dns.Msg {
 		Hdr: dns.RR_Header{Name: req.Question[0].Name, Rrtype: dns.TypeHINFO, Class: dns.ClassINET, Ttl: 3600},
 		Cpu: "RFC8482",
 	}}
+	return m
+}
+
+func floorTTL(m *dns.Msg, ttl uint32) *dns.Msg {
+	for _, sec := range [][]dns.RR{m.Answer, m.Ns} {
+		for _, rr := range sec {
+			if h := rr.Header(); h.Ttl < ttl {
+				h.Ttl = ttl
+			}
+		}
+	}
 	return m
 }
 

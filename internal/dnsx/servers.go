@@ -109,7 +109,7 @@ func DoTServer(addr string, tlsConf *tls.Config, r *Resolver, acc *access.Access
 	}
 	s := &dns.Server{Listener: ln, Net: "tcp-tls", MaxTCPQueries: -1,
 		ReadTimeout: 10 * time.Second,
-		IdleTimeout: func() time.Duration { return 60 * time.Second },
+		IdleTimeout: func() time.Duration { return 5 * time.Minute },
 		Handler:     &Handler{R: r, Access: acc, Proto: "dot", FP: fp}}
 	go func() {
 		if err := s.ActivateAndServe(); err != nil {
@@ -132,7 +132,7 @@ func NewDoQServer(addr string, tlsConf *tls.Config, r *Resolver, acc *access.Acc
 	tc.NextProtos = []string{"doq"}
 	tc.MinVersion = tls.VersionTLS13
 	ln, err := quic.ListenAddr(addr, tc, &quic.Config{
-		MaxIdleTimeout:        60 * time.Second,
+		MaxIdleTimeout:        5 * time.Minute,
 		MaxIncomingStreams:    256,
 		MaxIncomingUniStreams: -1,
 		KeepAlivePeriod:       0,

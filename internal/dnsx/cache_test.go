@@ -171,3 +171,32 @@ func TestCacheSaveLoad(t *testing.T) {
 		t.Fatalf("missing file: n=%d err=%v", n, err)
 	}
 }
+
+func TestClientTTLFloor(t *testing.T) {
+	f := &fakeUpstream{}
+	f.ip.Store("192.0.2.1")
+	r, _, _ := testResolver(f, time.Hour)
+	r.opt.ClientTTL = 300
+	ctx := context.Background()
+	req := query("example.com.")
+	q := req.Question[0]
+
+	m, act := r.forward(ctx, req, q, "example.com", Client{})
+	if _, ttl := firstA(t, m); act != "forward" || ttl != 300 {
+		t.Fatalf("forward: action %s ttl %d", act, ttl)
+	}
+	m, act = r.forward(ctx, req, q, "example.com", Client{})
+	if _, ttl := firstA(t, m); act != "cache" || ttl != 300 {
+		t.Fatalf("cache: action %s ttl %d", act, ttl)
+	}
+	e, _ := r.cache.Get(cacheKey{name: "example.com", qtype: dns.TypeA})
+	if e.msg.Answer[0].Header().Ttl != 60 {
+		t.Fatal("cached message was modified")
+	}
+
+	r.opt.ClientTTL = 0
+	m, _ = r.forward(ctx, req, q, "example.com", Client{})
+	if _, ttl := firstA(t, m); ttl > 60 {
+		t.Fatalf("no floor: ttl %d", ttl)
+	}
+}

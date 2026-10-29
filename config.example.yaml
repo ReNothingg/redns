@@ -58,6 +58,7 @@ cache:
   serve_stale: true
   stale_ttl: 24h
   optimistic: 12h
+  client_min_ttl: 300s
   prefetch: true
   max_ttl: 24h
 
