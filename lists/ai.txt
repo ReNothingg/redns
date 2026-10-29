@@ -62,6 +62,7 @@ studio.firebase.google.com
 o.pki.goog
 
 # Microsoft
+copilot.com
 copilot.microsoft.com
 copilot.cloud.microsoft
 sydney.bing.com
