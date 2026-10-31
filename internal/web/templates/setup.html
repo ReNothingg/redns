@@ -210,26 +210,17 @@
           <ol class="steps">
             <li>
               <div>
-                <span class="path">Параметры → Сеть и Интернет → Ethernet</span
-                >. Если интернет по Wi‑Fi:
-                <span class="path">Wi‑Fi → Свойства оборудования</span>.
+                Нажми
+                <span class="path">Win + X → Терминал (администратор)</span>.
+                Обычный PowerShell тоже подойдёт: скрипт сам попросит права.
               </div>
             </li>
             <li>
               <div>
-                Строку «Назначение IP» не трогай, там должно остаться
-                «Автоматически (DHCP)». Нужна
-                <span class="path"
-                  >Назначение DNS-сервера → Изменить → Вручную</span
-                >.
-              </div>
-            </li>
-            <li>
-              <div>
-                Включи IPv4. Предпочтительный DNS-сервер:
+                Вставь команду и нажми Enter:
                 <div class="inline-copy">
-                  <button class="copy" data-copy="{{.IPv4}}">
-                    <span class="v">{{.IPv4}}</span
+                  <button class="copy" data-copy="{{.WinCommand}}">
+                    <span class="v">{{.WinCommand}}</span
                     ><span class="c">Копировать</span>
                   </button>
                 </div>
@@ -237,47 +228,110 @@
             </li>
             <li>
               <div>
-                «DNS по протоколу HTTPS» → «Включено (ручной шаблон)», в шаблон
-                вставь:
-                <div class="inline-copy">
-                  <button class="copy" data-copy="{{.DoHURL}}">
-                    <span class="v">{{.DoHURL}}</span
-                    ><span class="c">Копировать</span>
-                  </button>
-                </div>
+                Скрипт включит DNS по HTTPS с ключом на Ethernet и Wi‑Fi,
+                запретит откат на обычный DNS и сам проверит подключение. В
+                конце должно быть зелёное «Готово».
               </div>
             </li>
             <li>
               <div>
-                «Возврат к обычному тексту» выключи, иначе при сбое запросы
-                уйдут открытым текстом. Дополнительный DNS оставь пустым.
-              </div>
-            </li>
-            {{if .IPv6}}
-            <li>
-              <div>
-                Включи IPv6 и заполни так же: тот же шаблон, «Возврат» выключен,
-                а DNS-сервер:
-                <div class="inline-copy">
-                  <button class="copy" data-copy="{{.IPv6}}">
-                    <span class="v">{{.IPv6}}</span
-                    ><span class="c">Копировать</span>
-                  </button>
-                </div>
-                Без этого Windows может ходить в DNS провайдера по IPv6.
-              </div>
-            </li>
-            {{end}}
-            <li>
-              <div>
-                Сохрани и обнови эту страницу: сверху должно быть «Работает».
+                Обнови эту страницу: сверху «Работает», протокол DoH.
               </div>
             </li>
           </ol>
+          <div class="actions">
+            <a class="btn" href="{{.ProfileBase}}/ReDNS-Windows.cmd"
+              ><svg aria-hidden="true"><use href="#i-download" /></svg>Или
+              скачай установщик</a
+            >
+          </div>
           <p class="note">
-            Windows 10 шифрованный DNS в настройках не умеет. Там настрой
-            браузер, вкладка «Браузер».
+            Нужна Windows 11, в Windows 10 системного DoH нет: настрой браузер
+            во вкладке «Браузер». Пока включён VPN, DNS идёт через него.
+            {{if .Private}}В команде твой ключ, не показывай её чужим.{{end}}
           </p>
+          <details class="more">
+            <summary>Настроить вручную</summary>
+            <ol class="steps">
+              <li>
+                <div>
+                  <span class="path">Параметры → Сеть и Интернет → Ethernet</span
+                  >. Если интернет по Wi‑Fi:
+                  <span class="path">Wi‑Fi → Свойства оборудования</span>.
+                </div>
+              </li>
+              <li>
+                <div>
+                  Строку «Назначение IP» не трогай, там должно остаться
+                  «Автоматически (DHCP)». Нужна
+                  <span class="path"
+                    >Назначение DNS-сервера → Изменить → Вручную</span
+                  >.
+                </div>
+              </li>
+              <li>
+                <div>
+                  Включи IPv4. Предпочтительный DNS-сервер:
+                  <div class="inline-copy">
+                    <button class="copy" data-copy="{{.IPv4}}">
+                      <span class="v">{{.IPv4}}</span
+                      ><span class="c">Копировать</span>
+                    </button>
+                  </div>
+                </div>
+              </li>
+              <li>
+                <div>
+                  «DNS по протоколу HTTPS» → «Включено (ручной шаблон)», в шаблон
+                  вставь:
+                  <div class="inline-copy">
+                    <button class="copy" data-copy="{{.DoHURL}}">
+                      <span class="v">{{.DoHURL}}</span
+                      ><span class="c">Копировать</span>
+                    </button>
+                  </div>
+                </div>
+              </li>
+              <li>
+                <div>
+                  «Возврат к обычному тексту» выключи, иначе при сбое запросы
+                  уйдут открытым текстом. Дополнительный DNS оставь пустым.
+                </div>
+              </li>
+              {{if .IPv6}}
+              <li>
+                <div>
+                  Включи IPv6 и заполни так же: тот же шаблон, «Возврат» выключен,
+                  а DNS-сервер:
+                  <div class="inline-copy">
+                    <button class="copy" data-copy="{{.IPv6}}">
+                      <span class="v">{{.IPv6}}</span
+                      ><span class="c">Копировать</span>
+                    </button>
+                  </div>
+                  Без этого Windows может ходить в DNS провайдера по IPv6.
+                </div>
+              </li>
+              {{end}}
+              <li>
+                <div>
+                  Сохрани и обнови эту страницу: сверху должно быть «Работает».
+                </div>
+              </li>
+            </ol>
+          </details>
+          <details class="more">
+            <summary>Отменить настройку</summary>
+            <p class="note">
+              Эта команда в терминале вернёт DNS, которые были до ReDNS:
+            </p>
+            <div class="inline-copy flush">
+              <button class="copy" data-copy="{{.WinRemove}}">
+                <span class="v">{{.WinRemove}}</span
+                ><span class="c">Копировать</span>
+              </button>
+            </div>
+          </details>
         </div>
         {{end}} {{if .Tab "browser"}}
         <div class="panel{{if .Active `browser`}} active{{end}}" id="p-browser">

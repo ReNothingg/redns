@@ -146,6 +146,46 @@ ol.steps.cont {
   margin-top: 16px;
 }
 
+details.more {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+details.more > summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-ink);
+  list-style: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+details.more > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.more > summary::after {
+  content: " ›";
+}
+
+details.more[open] > summary::after {
+  content: " ‹";
+}
+
+details.more[open] > summary {
+  margin-bottom: 8px;
+}
+
+details.more .note {
+  margin-top: 4px;
+}
+
+.inline-copy.flush {
+  margin-left: 0;
+  margin-top: 8px;
+}
+
 @media (max-width: 480px) {
   .copy {
     grid-template-columns: 1fr auto;

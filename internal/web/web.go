@@ -142,6 +142,8 @@ type pageData struct {
 	DoT              bool
 	AndroidDoT       string
 	ProfileBase      string
+	WinCommand       string
+	WinRemove        string
 	Rules            int
 	Version          string
 	Assets           string
@@ -185,10 +187,24 @@ func (w *Web) data(tok string) pageData {
 		d.DoHURL += "/" + tok
 		d.ProfileBase = "/setup/" + tok
 	}
+	d.WinCommand = WindowsCommand(d.fileURL(winScript))
+	d.WinRemove = WindowsCommand(d.fileURL(winRemoveScript))
 	if w.o.Info != nil {
 		d.Rules = w.o.Info().ProxyRules
 	}
 	return d
+}
+
+func (d pageData) fileURL(name string) string {
+	return "https://" + d.Host + d.ProfileBase + "/" + name
+}
+
+func setupFile(name string) bool {
+	switch name {
+	case winScript, winRemoveScript, winInstaller:
+		return true
+	}
+	return strings.HasSuffix(name, ".mobileconfig")
 }
 
 func (w *Web) index(rw http.ResponseWriter, r *http.Request) {
@@ -265,7 +281,7 @@ func (w *Web) setup(rw http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/setup"), "/"), "/")
 	tok, file := "", ""
 	switch {
-	case len(parts) == 1 && strings.HasSuffix(parts[0], ".mobileconfig"):
+	case len(parts) == 1 && setupFile(parts[0]):
 		file = parts[0]
 	case len(parts) == 1 && parts[0] != "":
 		tok = parts[0]
@@ -314,6 +330,27 @@ func (w *Web) setup(rw http.ResponseWriter, r *http.Request) {
 		rw.Header().Set("Content-Disposition", `attachment; filename="ReDNS-`+w.o.Host+`.mobileconfig"`)
 		rw.Header().Set("Cache-Control", "no-store")
 		_, _ = rw.Write(Profile(p))
+	case winScript, winRemoveScript, winInstaller:
+		if d.Only != "" && d.Only != "win" {
+			http.NotFound(rw, r)
+			return
+		}
+		rw.Header().Set("Cache-Control", "no-store")
+		if file == winInstaller {
+			rw.Header().Set("Content-Type", "application/octet-stream")
+			rw.Header().Set("Content-Disposition", `attachment; filename="`+winInstaller+`"`)
+			_, _ = rw.Write(WindowsInstaller(d.fileURL(winScript)))
+			return
+		}
+		mode := "install"
+		if file == winRemoveScript {
+			mode = "remove"
+		}
+		rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = rw.Write(WindowsScript(WindowsParams{
+			Mode: mode, Host: w.o.Host, DoHURL: d.DoHURL, ScriptURL: d.fileURL(file),
+			IPv4: w.o.IPv4, IPv6: w.o.IPv6, Label: d.TokenName,
+		}))
 	default:
 		http.NotFound(rw, r)
 	}
