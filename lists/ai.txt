@@ -115,6 +115,8 @@ openrouter.ai
 # Прочее
 perplexity.ai
 pplx.ai
+arena.ai
+lmarena.ai
 poe.com
 character.ai
 midjourney.com
