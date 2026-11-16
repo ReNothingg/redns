@@ -5,6 +5,7 @@ cloudflare-ech.com
 openai.com
 chatgpt.com
 chatgpt.site
+941archive.com
 chat.com
 ai.com
 sora.com
