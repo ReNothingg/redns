@@ -93,6 +93,7 @@ type Cache struct {
 type Proxy struct {
 	Lists   []ListSource `yaml:"lists"`
 	Exclude []ListSource `yaml:"exclude"`
+	Isolate []ListSource `yaml:"isolate"`
 
 	AnswerTTL time.Duration `yaml:"answer_ttl"`
 	Forwards  []Forward     `yaml:"forwards"`

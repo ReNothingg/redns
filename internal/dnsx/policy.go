@@ -45,6 +45,7 @@ type Policy struct {
 	Host    string
 	Proxy   *lists.Rules
 	Exclude *lists.Rules
+	Isolate *lists.Rules
 	Block   *lists.Rules
 	Allow   *lists.Rules
 	Hosts   map[string][]netip.Addr
@@ -94,6 +95,14 @@ func (p *Policy) proxied(name string) (string, bool) {
 		return "", false
 	}
 	return tag, true
+}
+
+func (p *Policy) Isolated(name string) bool {
+	if p.Isolate == nil {
+		return false
+	}
+	_, ok := p.Isolate.Match(name)
+	return ok
 }
 
 func (p *Policy) ProxyTarget(name string) (string, bool) {

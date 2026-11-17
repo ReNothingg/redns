@@ -11,6 +11,7 @@ import (
 
 	"github.com/miekg/dns"
 
+	"github.com/renothingg/redns/internal/lists"
 	"github.com/renothingg/redns/internal/stats"
 )
 
@@ -198,5 +199,35 @@ func TestClientTTLFloor(t *testing.T) {
 	m, _ = r.forward(ctx, req, q, "example.com", Client{})
 	if _, ttl := firstA(t, m); ttl > 60 {
 		t.Fatalf("no floor: ttl %d", ttl)
+	}
+}
+
+func TestIsolatedNameCallsHookWithShortTTL(t *testing.T) {
+	pol := &Policy{Host: "dns.example", Proxy: lists.NewRules(), Exclude: lists.NewRules(), Isolate: lists.NewRules()}
+	pol.Proxy.Add(lists.Rule{Kind: lists.Suffix, Value: "openai.com"}, "")
+	pol.Isolate.Add(lists.Rule{Kind: lists.Suffix, Value: "developers.openai.com"}, "")
+	r := &Resolver{opt: Options{IPv4: netip.MustParseAddr("192.0.2.1"), AnswerTTL: 300}, stats: stats.New(0)}
+	r.policy.Store(pol)
+	var calls []string
+	r.SetIsolate(func(_ context.Context, client netip.Addr, name string) {
+		calls = append(calls, client.String()+" "+name)
+	})
+	ask := func(name string) uint32 {
+		req := query(name)
+		m, _ := r.resolveIN(context.Background(), req, req.Question[0], lists.Normalize(name), Client{IP: netip.MustParseAddr("198.51.100.7")})
+		ip, ttl := firstA(t, m)
+		if ip != "192.0.2.1" {
+			t.Fatalf("%s resolved to %s", name, ip)
+		}
+		return ttl
+	}
+	if ttl := ask("platform.openai.com."); ttl != 300 || len(calls) != 0 {
+		t.Fatalf("plain proxied name: ttl=%d calls=%v", ttl, calls)
+	}
+	if ttl := ask("developers.openai.com."); ttl != isolateTTL {
+		t.Fatalf("isolated name ttl = %d, want %d", ttl, isolateTTL)
+	}
+	if len(calls) != 1 || calls[0] != "198.51.100.7 developers.openai.com" {
+		t.Fatalf("hook calls = %v", calls)
 	}
 }

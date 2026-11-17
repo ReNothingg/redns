@@ -68,6 +68,9 @@ func BuildPolicy(ctx context.Context, cfg *config.Config, f *lists.Fetcher) (*dn
 	for _, s := range cfg.Proxy.Exclude {
 		jobs = append(jobs, job{"exclude", s})
 	}
+	for _, s := range cfg.Proxy.Isolate {
+		jobs = append(jobs, job{"isolate", s})
+	}
 	if cfg.Block.Enabled {
 		for _, s := range cfg.Block.Lists {
 			jobs = append(jobs, job{"block", s})
@@ -91,6 +94,7 @@ func BuildPolicy(ctx context.Context, cfg *config.Config, f *lists.Fetcher) (*dn
 		Host:     cfg.Hostname,
 		Proxy:    lists.NewRules(),
 		Exclude:  lists.NewRules(),
+		Isolate:  lists.NewRules(),
 		Allow:    lists.NewRules(),
 		Hosts:    map[string][]netip.Addr{},
 		AllowAll: cfg.Proxy.AllowAllDomains,
@@ -117,6 +121,8 @@ func BuildPolicy(ctx context.Context, cfg *config.Config, f *lists.Fetcher) (*dn
 				}
 			case "exclude":
 				p.Exclude.Add(r, "")
+			case "isolate":
+				p.Isolate.Add(r, "")
 			case "block":
 				if r.Exception {
 					p.Allow.Add(r, "")

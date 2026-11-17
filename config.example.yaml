@@ -79,6 +79,12 @@ proxy:
     #   via: us
   exclude:
     - lists/exclude.txt
+  # Поддомены, которые живут у другого хостера, чем основной сайт с wildcard-сертификатом.
+  # Chrome шлёт запросы к ним по чужому HTTP/2-соединению (пример: developers.openai.com
+  # при открытом platform.openai.com даёт Cloudflare Error 1016). На DNS-запрос такого имени
+  # сервер закрывает мешающие соединения этого устройства.
+  isolate:
+    - lists/isolate.txt
   answer_ttl: 300s
   forwards:
     - port: 9339

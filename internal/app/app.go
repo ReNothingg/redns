@@ -178,6 +178,7 @@ func New(ctx context.Context, cfg *config.Config, version string) (*App, error) 
 		LocalTLS:          localTLS,
 		LocalHTTP:         localHTTP,
 	})
+	a.res.SetIsolate(a.proxy.Isolate)
 	return a, nil
 }
 
@@ -348,6 +349,7 @@ func (a *App) Reload(ctx context.Context) error {
 	merged.Access = cfg.Access
 	merged.Proxy.Lists = cfg.Proxy.Lists
 	merged.Proxy.Exclude = cfg.Proxy.Exclude
+	merged.Proxy.Isolate = cfg.Proxy.Isolate
 	merged.Block = cfg.Block
 	merged.Hosts = cfg.Hosts
 	pol, infos, err := BuildPolicy(ctx, &merged, a.fetcher)

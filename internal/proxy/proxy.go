@@ -58,6 +58,7 @@ type Proxy struct {
 	active  atomic.Int64
 	mu      sync.Mutex
 	clients map[netip.Prefix]*clientStat
+	certs   certCache
 	self    map[netip.Addr]bool
 	lns     []net.Listener
 	closed  atomic.Bool
@@ -273,7 +274,7 @@ func (p *Proxy) local(l *Local, c net.Conn, prefix []byte) {
 
 func (p *Proxy) relay(c net.Conn, ip netip.Addr, host string, port int, exit string, prefix []byte) {
 	defer c.Close()
-	if !p.acquire(ip, c, host) {
+	if !p.acquire(ip, c, host, port, exit) {
 		p.o.Stats.ConnsDenied.Add(1)
 		return
 	}

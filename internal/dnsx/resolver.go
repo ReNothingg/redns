@@ -30,6 +30,8 @@ type Hinter interface {
 	Hint(client netip.Addr, name string)
 }
 
+type IsolateFunc func(ctx context.Context, client netip.Addr, name string)
+
 type Options struct {
 	IPv4, IPv6 netip.Addr
 	AnswerTTL  uint32
@@ -42,23 +44,27 @@ type Options struct {
 }
 
 const (
+	isolateTTL     = 5
 	optimisticTTL  = 30
 	lookupStaleMax = 10 * time.Minute
 )
 
 type Resolver struct {
-	opt    Options
-	policy atomic.Pointer[Policy]
-	cache  *Cache
-	up     *Upstream
-	access *access.Access
-	stats  *stats.Stats
-	hinter Hinter
-	probes *Probes
-	sf     singleflight.Group
+	opt     Options
+	policy  atomic.Pointer[Policy]
+	cache   *Cache
+	up      *Upstream
+	access  *access.Access
+	stats   *stats.Stats
+	hinter  Hinter
+	probes  *Probes
+	isolate IsolateFunc
+	sf      singleflight.Group
 }
 
 func (r *Resolver) SetProbes(p *Probes) { r.probes = p }
+
+func (r *Resolver) SetIsolate(f IsolateFunc) { r.isolate = f }
 
 func NewResolver(opt Options, p *Policy, cache *Cache, up *Upstream, acc *access.Access, st *stats.Stats, h Hinter) *Resolver {
 	if opt.AnswerTTL == 0 {
@@ -152,7 +158,14 @@ func (r *Resolver) resolveIN(ctx context.Context, req *dns.Msg, q dns.Question, 
 			if c.IP.Unmap().Is4() {
 				v6 = netip.Addr{}
 			}
-			return r.addrReply(req, q, r.opt.IPv4, v6, r.opt.AnswerTTL), "proxy"
+			ttl := r.opt.AnswerTTL
+			if p.Isolated(name) {
+				ttl = min(ttl, isolateTTL)
+				if r.isolate != nil {
+					r.isolate(ctx, c.IP, name)
+				}
+			}
+			return r.addrReply(req, q, r.opt.IPv4, v6, ttl), "proxy"
 		case dns.TypeHTTPS, dns.TypeSVCB:
 
 			return nodata(req, q.Name, r.opt.AnswerTTL), "proxy"

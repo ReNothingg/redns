@@ -10,12 +10,18 @@ import (
 )
 
 type clientStat struct {
-	conns map[net.Conn]struct{}
+	conns map[net.Conn]connMeta
 	total uint64
 	up    uint64
 	down  uint64
 	last  time.Time
 	hosts map[string]uint64
+}
+
+type connMeta struct {
+	host string
+	port int
+	exit string
 }
 
 type ClientStat struct {
@@ -30,7 +36,7 @@ type ClientStat struct {
 
 const maxClients = 200000
 
-func (p *Proxy) acquire(ip netip.Addr, c net.Conn, host string) bool {
+func (p *Proxy) acquire(ip netip.Addr, c net.Conn, host string, port int, exit string) bool {
 	k := access.Key(ip)
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -42,13 +48,13 @@ func (p *Proxy) acquire(ip netip.Addr, c net.Conn, host string) bool {
 		if len(p.clients) >= maxClients {
 			return false
 		}
-		cs = &clientStat{conns: map[net.Conn]struct{}{}, hosts: map[string]uint64{}}
+		cs = &clientStat{conns: map[net.Conn]connMeta{}, hosts: map[string]uint64{}}
 		p.clients[k] = cs
 	}
 	if p.o.MaxConnsPerClient > 0 && len(cs.conns) >= p.o.MaxConnsPerClient {
 		return false
 	}
-	cs.conns[c] = struct{}{}
+	cs.conns[c] = connMeta{host: host, port: port, exit: exit}
 	cs.total++
 	cs.last = time.Now()
 	if _, ok := cs.hosts[host]; ok || len(cs.hosts) < 64 {
