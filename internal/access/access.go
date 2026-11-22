@@ -385,19 +385,26 @@ func (a *Access) Deauthorize(p netip.Prefix) int {
 	return n
 }
 
-func (a *Access) Allowed(ip netip.Addr) bool {
+func (r *rules) allowsAddress(ip netip.Addr) bool {
 	ip = ip.Unmap()
-	if a.Banned(ip) {
-		return false
-	}
-	r := a.rules.Load()
-	if !r.private || ip.IsLoopback() {
+	if ip.IsLoopback() {
 		return true
 	}
 	for _, p := range r.cidrs {
 		if p.Contains(ip) {
 			return true
 		}
+	}
+	return false
+}
+
+func (a *Access) Allowed(ip netip.Addr) bool {
+	if a.Banned(ip) {
+		return false
+	}
+	r := a.rules.Load()
+	if !r.private || r.allowsAddress(ip) {
+		return true
 	}
 	a.mu.Lock()
 	e := a.clients[Key(ip)]
@@ -419,10 +426,8 @@ func (a *Access) ProxyAllowed(ip netip.Addr) bool {
 	if a.Banned(ip) {
 		return false
 	}
-	if !a.rules.Load().strict {
-		return true
-	}
-	return a.Allowed(ip) || a.authorized(ip)
+	r := a.rules.Load()
+	return !r.strict || r.allowsAddress(ip) || a.authorized(ip)
 }
 
 func (a *Access) Strike(ip netip.Addr) {
@@ -457,19 +462,13 @@ func (a *Access) Throttled(ip netip.Addr) bool {
 }
 
 func (a *Access) Trusted(ip netip.Addr) bool {
-	ip = ip.Unmap()
 	if a.Banned(ip) {
 		return false
 	}
-	if ip.IsLoopback() {
+	r := a.rules.Load()
+	if r.allowsAddress(ip) {
 		return true
 	}
-	for _, p := range a.rules.Load().cidrs {
-		if p.Contains(ip) {
-			return true
-		}
-	}
-	r := a.rules.Load()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	e := a.clients[Key(ip)]

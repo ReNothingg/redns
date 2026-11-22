@@ -148,6 +148,9 @@ func (r *Resolver) resolveIN(ctx context.Context, req *dns.Msg, q dns.Question, 
 		m.Ns = []dns.RR{fakeSOA(q.Name)}
 		return m, "nxdomain"
 	case ActProxy:
+		if !r.access.ProxyAllowed(c.IP) {
+			break
+		}
 		switch q.Qtype {
 		case dns.TypeA, dns.TypeAAAA:
 			r.stats.Proxied.Add(1)

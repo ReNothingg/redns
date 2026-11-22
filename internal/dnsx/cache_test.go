@@ -11,7 +11,10 @@ import (
 
 	"github.com/miekg/dns"
 
+	"github.com/renothingg/redns/internal/access"
+	"github.com/renothingg/redns/internal/config"
 	"github.com/renothingg/redns/internal/lists"
+	"github.com/renothingg/redns/internal/state"
 	"github.com/renothingg/redns/internal/stats"
 )
 
@@ -207,6 +210,7 @@ func TestIsolatedNameCallsHookWithShortTTL(t *testing.T) {
 	pol.Proxy.Add(lists.Rule{Kind: lists.Suffix, Value: "openai.com"}, "")
 	pol.Isolate.Add(lists.Rule{Kind: lists.Suffix, Value: "developers.openai.com"}, "")
 	r := &Resolver{opt: Options{IPv4: netip.MustParseAddr("192.0.2.1"), AnswerTTL: 300}, stats: stats.New(0)}
+	r.access = access.New(pol.Host, config.Access{}, state.Data{})
 	r.policy.Store(pol)
 	var calls []string
 	r.SetIsolate(func(_ context.Context, client netip.Addr, name string) {
@@ -229,5 +233,30 @@ func TestIsolatedNameCallsHookWithShortTTL(t *testing.T) {
 	}
 	if len(calls) != 1 || calls[0] != "198.51.100.7 developers.openai.com" {
 		t.Fatalf("hook calls = %v", calls)
+	}
+}
+
+func TestPublicDNSWithStrictProxy(t *testing.T) {
+	const name = "service.example"
+	up := &fakeUpstream{}
+	up.ip.Store("192.0.2.1")
+	r, _, _ := testResolver(up, 0)
+	r.opt.IPv4 = netip.MustParseAddr("192.0.2.2")
+	pol := &Policy{Host: "dns.example", Proxy: lists.NewRules(), Exclude: lists.NewRules()}
+	pol.Proxy.Add(lists.Rule{Kind: lists.Exact, Value: name}, "")
+	r.SetPolicy(pol)
+	r.access = access.New(pol.Host, config.Access{
+		Mode: "public", StrictProxy: true, AuthTTL: time.Hour,
+		Tokens: []config.Token{{Name: "device", Token: "device-key"}},
+	}, state.Data{})
+
+	client := Client{IP: netip.MustParseAddr("198.51.100.7"), Proto: "doh"}
+	req := query(dns.Fqdn(name))
+	if ip, _ := firstA(t, r.Resolve(t.Context(), req, client)); ip != "192.0.2.1" || r.access.ProxyAllowed(client.IP) {
+		t.Fatalf("anonymous public DNS client: answer %s, proxy allowed %t", ip, r.access.ProxyAllowed(client.IP))
+	}
+	client.Token = "device-key"
+	if ip, _ := firstA(t, r.Resolve(t.Context(), req, client)); ip != r.opt.IPv4.String() || !r.access.ProxyAllowed(client.IP) {
+		t.Fatalf("authorized DNS client: answer %s, proxy allowed %t", ip, r.access.ProxyAllowed(client.IP))
 	}
 }

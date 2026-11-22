@@ -35,6 +35,7 @@ intercomcdn.com
 
 # Google AI
 gemini.google.com
+geminiweb-pa.clients6.google.com
 gemini.google
 aistudio.google.com
 ai.google.dev
